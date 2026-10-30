@@ -1,0 +1,17 @@
+{
+  "format": "emerge.graph-spec/v1",
+  "graph_version": 2,
+  "nodes": {
+    "h": {
+      "type": "holder",
+      "description": "holds",
+      "params": {}
+    },
+    "w": {
+      "type": "step",
+      "description": "waits",
+      "params": {},
+      "start_when": {"any_of": [{"all_of": {"h": "done"}}]}
+    }
+  }
+}

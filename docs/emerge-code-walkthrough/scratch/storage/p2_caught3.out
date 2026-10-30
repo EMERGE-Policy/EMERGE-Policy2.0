@@ -1,0 +1,6 @@
+journal before: delete
+StorageError: /data/yuqingchi/tmp/emerge-code-walkthrough/scratch/storage/tmp/v3/.emerge/state.db has schema version 3; this code understands 2
+/data/yuqingchi/miniconda3/envs/EmergePolicy2.0/lib/python3.12/site-packages/aiosqlite/core.py:102: ResourceWarning: <aiosqlite.core.Connection object at 0x757e185b4c90> was deleted before being closed. Please use 'async with' or '.close()' to close the connection properly.
+  warn(
+journal after: wal
+main returned

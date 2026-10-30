@@ -1,0 +1,3 @@
+caller saw: CancelledError | lock free: True
+system after cancel (read through storage): NEW
+system in db file: ('NEW',)

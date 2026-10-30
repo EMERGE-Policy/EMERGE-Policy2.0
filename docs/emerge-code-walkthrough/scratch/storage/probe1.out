@@ -1,0 +1,148 @@
+[user_version] (2,)
+[journal_mode] ('wal',)
+[counters] [('ask_seq', 0), ('pending_seq', 0), ('session_seq', 0)]
+[fk runs] []
+[fk messages] []
+[tables] ['asks', 'counters', 'graphs', 'memory_assets', 'memory_entries', 'memory_entries_fts', 'memory_entries_fts_config', 'memory_entries_fts_data', 'memory_entries_fts_docsize', 'memory_entries_fts_idx', 'memory_files', 'messages', 'node_states', 'pending_inputs', 'port_messages', 'queued_node_messages', 'runs', 'sessions']
+[create int-key metadata] pydantic_core._pydantic_core.ValidationError: 1 validation error for SessionRecord
+metadata.3.[key]
+  Input should be a valid string [type=string_type, input_value=3, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.14/v/string_type
+[int-key session row exists] ['ik']
+[create metadata returned] {'a': (1, 2)}
+[create metadata read back] {'a': [1, 2]}
+[create non-json metadata] builtins.TypeError: Object of type set is not JSON serializable
+[get missing] OK -> None
+[update no fields -> updated_at changed] True
+[current_run_id unchecked] RUNX
+[clear wins over id] None
+[metadata {} replaces] {}
+[update missing] emerge.exceptions.StorageError: session 'nope' does not exist
+[list limit=0] 0
+[list limit=-1] 5
+[list all] 5
+[update status=bogus] pydantic_core._pydantic_core.ValidationError: 1 validation error for SessionRecord
+status
+  Input should be 'idle' or 'turn_open' [type=literal_error, input_value='bogus', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/literal_error
+[get after bogus] pydantic_core._pydantic_core.ValidationError: 1 validation error for SessionRecord
+status
+  Input should be 'idle' or 'turn_open' [type=literal_error, input_value='bogus', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/literal_error
+[list after bogus] pydantic_core._pydantic_core.ValidationError: 1 validation error for SessionRecord
+status
+  Input should be 'idle' or 'turn_open' [type=literal_error, input_value='bogus', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/literal_error
+[update intent=-1] pydantic_core._pydantic_core.ValidationError: 1 validation error for SessionRecord
+intent_count
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.14/v/greater_than_equal
+[get after intent -1] pydantic_core._pydantic_core.ValidationError: 1 validation error for SessionRecord
+intent_count
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.14/v/greater_than_equal
+[append to missing session] emerge.exceptions.StorageError: session 'nope' does not exist
+[session_seq after failed append] (0,)
+[seq global across sessions] (1, 2, 3)
+[append turn=-1] pydantic_core._pydantic_core.ValidationError: 1 validation error for StoredMessage
+turn
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.14/v/greater_than_equal
+[load after turn -1] pydantic_core._pydantic_core.ValidationError: 1 validation error for StoredMessage
+turn
+  Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+    For further information visit https://errors.pydantic.dev/2.14/v/greater_than_equal
+[discard missing session] 0
+[discard turn1] 1
+[discard turn1 again] 0
+[load] [(1, 0, 'u0'), (5, 1, 'u1-again')]
+[compact empty kept] [(6, 0, True)]
+[load after compact] [(6, 0, True)]
+[discard turn0 (summary)] 1
+[load after discarding summary] []
+[append summary=True w/o compact] [(3, True), (4, False)]
+[load missing session] ()
+[pending to missing] emerge.exceptions.StorageError: session 'nope' does not exist
+[remove pending wrong session] OK -> None
+[pending still there] [1]
+[remove pending missing seq] OK -> None
+[create_run missing session] emerge.exceptions.StorageError: session 'nope' does not exist
+[session current_run after create_run] True
+[second create_run overwrites current] True
+[finished stamps] True
+[finished again re-stamps] True
+[finished -> running allowed, finished_at] None
+[closed finished_at] None
+[running with explicit finished_at] 123.0
+[set_run_status missing] emerge.exceptions.StorageError: run 'nope' does not exist
+[set_run_status bogus] pydantic_core._pydantic_core.ValidationError: 1 validation error for RunRecord
+status
+  Input should be 'running', 'idle', 'paused', 'closed', 'finished' or 'stopped' [type=literal_error, input_value='bogus', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/literal_error
+[get_run after bogus] pydantic_core._pydantic_core.ValidationError: 1 validation error for RunRecord
+status
+  Input should be 'running', 'idle', 'paused', 'closed', 'finished' or 'stopped' [type=literal_error, input_value='bogus', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/literal_error
+[bogus finished_at stamped?] ('bogus', 1793293810.4927652)
+[set_run_paused missing] emerge.exceptions.StorageError: run 'nope' does not exist
+[paused independent of status] ('running', True)
+[load_run_state missing] None
+[load_graph missing] None
+[set_node_state no run check] NO-SUCH-RUN
+[defaults overwrite outcome/reason/error] [('running', None, '', None)]
+[set_node_state bogus] pydantic_core._pydantic_core.ValidationError: 1 validation error for NodeState
+state
+  Input should be 'pending', 'starting', 'running', 'paused', 'stopping', 'finished', 'failed', 'stopped' or 'skipped' [type=literal_error, input_value='bogus', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/literal_error
+[node_states after bogus] pydantic_core._pydantic_core.ValidationError: 1 validation error for NodeState
+state
+  Input should be 'pending', 'starting', 'running', 'paused', 'stopping', 'finished', 'failed', 'stopped' or 'skipped' [type=literal_error, input_value='bogus', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/literal_error
+[load_run_state after bogus] pydantic_core._pydantic_core.ValidationError: 1 validation error for NodeState
+state
+  Input should be 'pending', 'starting', 'running', 'paused', 'stopping', 'finished', 'failed', 'stopped' or 'skipped' [type=literal_error, input_value='bogus', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/literal_error
+[snapshot creates pending row] [('m', 'pending')]
+[snapshot keys/tuples] {'1': 'a', 't': [1, 2]}
+[snapshot None stored as] ('null',)
+[snapshot None read] None
+[snapshot non-json] builtins.TypeError: Object of type set is not JSON serializable
+[snapshot NaN read] nan
+[put wrong type] emerge.exceptions.StorageError: port messages hold graph.ports.Message, got Message
+[window 3 after v1..5] [3, 4, 5]
+[duplicate version] sqlite3.IntegrityError: UNIQUE constraint failed: port_messages.run_id, port_messages.node, port_messages.port, port_messages.version
+[out-of-order old version re-inserted] [1, 3, 4, 5]
+[sparse jump to 100] [100]
+[after_version=2 (trimmed cursor)] [100]
+[version 0 accepted] [0]
+[latest] [('b', 'out', 0), ('a', 'out', 100)]
+[put_port_message no run check] NO-SUCH-RUN
+[queue missing run] emerge.exceptions.StorageError: run 'nope' does not exist
+[queue duplicate seq] sqlite3.IntegrityError: UNIQUE constraint failed: queued_node_messages.run_id, queued_node_messages.instance_id, queued_node_messages.seq
+[mark delivered] 1
+[mark delivered again] 0
+[queued default excludes delivered] 0
+[queued include delivered] 1
+[mark on missing run] 0
+[add_ask missing run] emerge.exceptions.StorageError: run 'nope' does not exist
+[ask ids global] ('ask1', 'ask2')
+[void pending] ('void', True)
+[answer a void ask] ('answered', 'late')
+[void an answered ask (unchanged)] ('answered', 'late', True)
+[answer twice overwrites] ('again', True)
+[answer missing] emerge.exceptions.StorageError: ask 'ask999' does not exist
+[void missing] emerge.exceptions.StorageError: ask 'ask999' does not exist
+[next_content_time missing run] emerge.exceptions.StorageError: run 'nope' does not exist
+[200 concurrent unique/contiguous] (200, 1, 200)
+[runs.content_time] 200
+[delete missing] emerge.exceptions.StorageError: session 'nope' does not exist
+[delete with running run] emerge.exceptions.StorageError: session 'b4310eb88ea34571a6e00b130a35756a' still has open runs: a15ba6ca602f4cb29f0de4e7befaa80a (running), 4352f025939c4998a8df666dc10e9152 (running)
+[after delete: runs] (0,)
+[after delete: timeline counters] []
+[after delete: fts rows] (0,)
+[after delete: orphan port msgs (NO-SUCH-RUN)] (1,)
+[sessions/<id>/ removed entirely] False
+[runs/<id>/ kept] True
+[aclose twice] builtins.ValueError: no active connection
+[call after aclose] builtins.ValueError: no active connection
+[wal after close exists] False

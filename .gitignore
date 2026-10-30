@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.env
+
+# Local runtime workspace (holds API keys); the template lives in emerge/workspace_template/
+workspace/
+*.sqlite
+*.db
+*.db-wal
+*.db-shm
+# Runtime state of any workspace (the database), e.g. those made by experiments under docs/
+.emerge/

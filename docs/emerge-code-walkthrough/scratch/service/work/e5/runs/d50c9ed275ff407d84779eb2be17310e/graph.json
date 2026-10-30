@@ -1,0 +1,16 @@
+{
+  "format": "emerge.graph-spec/v1",
+  "graph_version": 2,
+  "nodes": {
+    "x": {
+      "type": "stubborn",
+      "description": "x2",
+      "params": {}
+    },
+    "y": {
+      "type": "step",
+      "description": "y",
+      "params": {"duration": 0.1}
+    }
+  }
+}

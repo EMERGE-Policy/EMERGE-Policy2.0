@@ -1,0 +1,268 @@
+TOOLS: 20 ['list_node_types', 'describe_node_type', 'use_skill', 'read_file', 'edit_file', 'write_file', 'commit_graph', 'reset_graph', 'show_graph', 'register_node_code', 'start_run', 'run_status', 'node_detail', 'pause', 'resume', 'stop_node', 'end_run', 'send_to_node', 'write_memory', 'search_memory']
+== no run yet
+--- run_status() is_error=True
+{"tool": "run_status", "error": "ToolError: there is no run yet; start_run creates one"}
+--- commit_graph() is_error=True
+{"tool": "commit_graph", "error": "ToolError: there is no run yet; start_run creates one"}
+--- show_graph() is_error=True
+{"tool": "show_graph", "error": "ToolError: there is no run yet; start_run creates one"}
+--- pause() is_error=True
+{"tool": "pause", "error": "ToolError: there is no run yet; start_run creates one"}
+--- reset_graph() is_error=True
+{"tool": "reset_graph", "error": "ToolError: there is no run yet; start_run creates one"}
+== start_run
+--- start_run() is_error=False
+started run c047471decf2407b9f074665bad46ccd; its graph is empty. Read runs/c047471decf2407b9f074665bad46ccd/graph.json, draw the nodes, inputs and start conditions in it, then commit_graph (dry_run first if unsure).
+--- start_run() is_error=True
+{"tool": "start_run", "error": "ToolError: run c047471decf2407b9f074665bad46ccd is still open; end_run first, or keep drawing in it"}
+graph file: {
+  "format": "emerge.graph-spec/v1",
+  "graph_version": 0,
+  "nodes": {}
+}
+
+runtime info now:
+[Run status, shown again whenever it changes]
+run c047471decf2407b9f074665bad46ccd: running
+graph file runs/c047471decf2407b9f074665bad46ccd/graph.json matches graph version 0.
+== description check
+--- commit_graph(dry_run=True) is_error=False
+not committed: new and replaced nodes need a description saying what they do; empty for: h. The file was not changed; add the descriptions and commit again.
+--- commit_graph() is_error=False
+not committed: new and replaced nodes need a description saying what they do; empty for: h. The file was not changed; add the descriptions and commit again.
+--- commit_graph() is_error=False
+not committed: this is the same file that was refused a moment ago, at the same graph version. Change it according to that error first, or do it another way (stop_node, a new node, reset_graph).
+--- commit_graph(dry_run=True) is_error=False
+not committed: new and replaced nodes need a description saying what they do; empty for: h. The file was not changed; add the descriptions and commit again.
+--- commit_graph(dry_run=True) is_error=False
+dry run, nothing committed
+added h
+starts now: h
+--- commit_graph() is_error=False
+committed: version 0 -> 1
+added h
+started: h
+The graph file was rewritten at version 1; read it again before the next edit.
+== no change / replace unknown / replace known without description change
+--- commit_graph() is_error=False
+no changes; the graph stays at version 1
+--- commit_graph(replace=['zz']) is_error=False
+not committed (rejected): cannot replace 'zz': only a node in both the graph and the file has an instance to replace
+The file was left exactly as you wrote it; fix it in place and commit again.
+--- commit_graph(dry_run=True, replace=['h']) is_error=False
+dry run, nothing committed
+replaced h: h@v1 -> h@v2
+starts once the old instance has stopped: h
+== stale
+runtime info with stale draft:
+[Run status, shown again whenever it changes]
+run c047471decf2407b9f074665bad46ccd: running
+nodes:
+  h: running
+recent:
+  graph changed: version 0 -> 1
+graph file runs/c047471decf2407b9f074665bad46ccd/graph.json holds edits not committed yet: commit_graph applies them, reset_graph drops them. It was written from an older graph version: reset_graph, then redo the edits.
+--- commit_graph() is_error=False
+not committed (stale): the graph file was written from graph version 0, but the graph is at version 1 now; take a fresh file of the current graph and make the edit again. Call reset_graph_file, read the file again and redo the edit.
+The file was not changed. Call reset_graph, read the file again and redo the edit.
+--- commit_graph() is_error=False
+not committed: this is the same file that was refused a moment ago, at the same graph version. Change it according to that error first, or do it another way (stop_node, a new node, reset_graph).
+--- reset_graph() is_error=False
+runs/c047471decf2407b9f074665bad46ccd/graph.json now holds graph version 1, with no uncommitted edits.
+== remove a running node
+--- commit_graph(dry_run=True) is_error=False
+not committed (rejected): node 'h' is running: only a node that has not started can be removed; stop it instead; it then stays in the graph
+The file was left exactly as you wrote it; fix it in place and commit again.
+--- commit_graph() is_error=False
+not committed (rejected): node 'h' is running: only a node that has not started can be removed; stop it instead; it then stays in the graph
+The file was left exactly as you wrote it; fix it in place and commit again.
+file kept as written: {}
+--- reset_graph() is_error=False
+runs/c047471decf2407b9f074665bad46ccd/graph.json now holds graph version 1, with no uncommitted edits.
+== bad JSON
+--- commit_graph() is_error=False
+not committed (format): graph file is not valid JSON: line 1 column 46: Expecting property name enclosed in double quotes
+The file was left exactly as you wrote it; fix it in place and commit again.
+runtime info with broken file:
+[Run status, shown again whenever it changes]
+run c047471decf2407b9f074665bad46ccd: running
+nodes:
+  h: running
+recent:
+  graph changed: version 0 -> 1
+graph file runs/c047471decf2407b9f074665bad46ccd/graph.json holds edits not committed yet: commit_graph applies them, reset_graph drops them.
+--- reset_graph() is_error=False
+runs/c047471decf2407b9f074665bad46ccd/graph.json now holds graph version 1, with no uncommitted edits.
+== missing file
+--- commit_graph() is_error=False
+not committed (missing_file): /data/yuqingchi/tmp/emerge-code-walkthrough/scratch/agent/work/e3/runs/c047471decf2407b9f074665bad46ccd/graph.json does not exist; reset_graph_file writes the current graph
+The file was left exactly as you wrote it; fix it in place and commit again.
+--- commit_graph() is_error=False
+not committed: this is the same file that was refused a moment ago, at the same graph version. Change it according to that error first, or do it another way (stop_node, a new node, reset_graph).
+--- run_status() is_error=False
+run c047471decf2407b9f074665bad46ccd: running, graph version 1
+- h (holder, h@v1): running; about: holds
+graph file runs/c047471decf2407b9f074665bad46ccd/graph.json: same as the running graph
+runtime info with missing file:
+[Run status, shown again whenever it changes]
+run c047471decf2407b9f074665bad46ccd: running
+nodes:
+  h: running
+recent:
+  graph changed: version 0 -> 1
+graph file runs/c047471decf2407b9f074665bad46ccd/graph.json matches graph version 1.
+--- reset_graph() is_error=False
+runs/c047471decf2407b9f074665bad46ccd/graph.json now holds graph version 1, with no uncommitted edits.
+== looking
+--- show_graph() is_error=False
+run c047471decf2407b9f074665bad46ccd: running
+graph v1  nodes=1  subscriptions=0
+  h (holder) instance h@v1  [running]
+      about: holds
+  roots: h
+graph file runs/c047471decf2407b9f074665bad46ccd/graph.json: same as the running graph
+--- node_detail(node_id='zz') is_error=True
+{"tool": "node_detail", "error": "ToolError: no node 'zz' in run c047471decf2407b9f074665bad46ccd"}
+--- describe_node_type(name='nope') is_error=True
+{"tool": "describe_node_type", "error": "ToolError: no node type 'nope'; registered: counter, printer, doubler, checker, step, grasp, scene_check, asker, reporter, chatter, writer, holder"}
+--- describe_node_type(name='holder') is_error=False
+{
+  "name": "holder",
+  "description": "Keeps running (doing nothing) until it is stopped.",
+  "inputs": [],
+  "outputs": [],
+  "reads": [],
+  "irreversible": false,
+  "outcomes": [
+    "done"
+  ],
+  "params_schema": {
+    "type": "object",
+    "properties": {}
+  },
+  "locator": {
+    "origin": "module",
+    "module": "p8_nodes",
+    "path": null,
+    "version": null,
+    "digest": null
+  }
+}
+== send / stop / pause / resume
+--- commit_graph() is_error=False
+committed: version 1 -> 2
+added w; starts after h
+waiting for start edges: w
+The graph file was rewritten at version 2; read it again before the next edit.
+--- send_to_node(node_id='h', text='hello', data={'k': 1}) is_error=False
+delivered to h (h@v1) as message 1
+--- send_to_node(node_id='w', text='later') is_error=False
+queued for w (w@v2): it has not started yet and gets the message when it does
+--- send_to_node(node_id='zz', text='x') is_error=True
+{"tool": "send_to_node", "error": "ToolError: not delivered: no node 'zz' in the graph"}
+--- stop_node(node_id='w') is_error=True
+{"tool": "stop_node", "error": "ToolError: node 'w' has not started; remove it instead of stopping it"}
+--- pause() is_error=False
+run c047471decf2407b9f074665bad46ccd is now paused
+--- resume() is_error=False
+run c047471decf2407b9f074665bad46ccd is now running
+--- pause(node_id='h') is_error=False
+h is now paused
+--- resume(node_id='h') is_error=False
+h is now running
+--- resume(node_id='h') is_error=False
+h is now running
+--- run_status() is_error=False
+run c047471decf2407b9f074665bad46ccd: running, graph version 2
+- h (holder, h@v1): running; about: holds
+- w (step, w@v2): pending; about: waits
+graph file runs/c047471decf2407b9f074665bad46ccd/graph.json: same as the running graph
+== end
+--- end_run() is_error=False
+run c047471decf2407b9f074665bad46ccd ended as finished at graph version 2
+--- end_run() is_error=True
+{"tool": "end_run", "error": "ToolError: run c047471decf2407b9f074665bad46ccd has ended (finished); start_run begins a new one"}
+--- show_graph() is_error=False
+run c047471decf2407b9f074665bad46ccd: finished
+graph v2  nodes=2  subscriptions=0
+  h (holder) instance h@v1  [stopped]
+      about: holds
+  w (step) instance w@v2  [skipped]
+      about: waits
+      starts after h[done]
+  roots: h
+graph file runs/c047471decf2407b9f074665bad46ccd/graph.json: same as the running graph
+--- commit_graph() is_error=True
+{"tool": "commit_graph", "error": "ToolError: run c047471decf2407b9f074665bad46ccd has ended (finished); start_run begins a new one"}
+--- reset_graph() is_error=True
+{"tool": "reset_graph", "error": "ToolError: run c047471decf2407b9f074665bad46ccd has ended (finished); start_run begins a new one"}
+--- send_to_node(node_id='h', text='x') is_error=True
+{"tool": "send_to_node", "error": "ToolError: run c047471decf2407b9f074665bad46ccd has ended (finished); start_run begins a new one"}
+runtime info after end:
+[Run status, shown again whenever it changes]
+run c047471decf2407b9f074665bad46ccd: finished
+nodes:
+  h stopped
+  w: skipped
+recent:
+  graph changed: version 0 -> 1
+  graph changed: version 1 -> 2
+  h stopped
+  w can never start: none of its start edges can fire any more (skipped)
+--- start_run() is_error=False
+started run 9a3bc72f73f344609f7ae5fd96bb96d8; its graph is empty. Read runs/9a3bc72f73f344609f7ae5fd96bb96d8/graph.json, draw the nodes, inputs and start conditions in it, then commit_graph (dry_run first if unsure).
+== register_node_code
+--- register_node_code(name='1bad', source='x') is_error=True
+{"tool": "register_node_code", "error": "ToolError: type name '1bad' must start with a letter and hold only letters, digits and underscores"}
+--- register_node_code(name='good', source='syntax error here(') is_error=True
+{"tool": "register_node_code", "error": "ToolError: not registered: cannot load node file /data/yuqingchi/tmp/emerge-code-walkthrough/scratch/agent/work/e3/code/good/v1.py: SyntaxError: '(' was never closed (v1.py, line 1)"}
+--- register_node_code(...) is_error=True
+{"tool": "register_node_code", "error": "ToolError: not registered: the file must declare exactly one node type named 'holder'; it declares ['asker', 'chatter', 'checker', 'counter', 'doubler', 'grasp', 'holder', 'printer', 'reporter', 'scene_check', 'step', 'writer']"}
+--- register_node_code(...) is_error=True
+{"tool": "register_node_code", "error": "ToolError: not registered: the file must declare exactly one node type named 'gen_two'; it declares ['gen_one']"}
+--- register_node_code(...) is_error=False
+registered gen_one version 1 from code/gen_one/v1.py: outcomes done; no ports; reversible. In graph.json write "type": "gen_one" (and "code": "1" to move an existing node onto this version).
+--- register_node_code(...) is_error=False
+registered gen_one version 2 from code/gen_one/v2.py: outcomes done; no ports; reversible. In graph.json write "type": "gen_one" (and "code": "2" to move an existing node onto this version).
+code dir: ['v1.py', 'v2.py']
+== memory
+--- write_memory(text='   ') is_error=True
+{"tool": "write_memory", "error": "ToolError: the entry is empty"}
+--- write_memory(text='x', images=[{'path': 'imgs', 'description': 'd'}]) is_error=True
+{"tool": "write_memory", "error": "ToolError: imgs holds 2 images; name the image file itself"}
+--- write_memory(text='x', images=[{'path': 'imgs/c.txt', 'description': 'd'}]) is_error=True
+{"tool": "write_memory", "error": "ToolError: imgs/c.txt is not an image (.gif, .jpeg, .jpg, .png, .webp)"}
+--- write_memory(text='x', images=[{'path': 'imgs/a.png', 'description': 'd', 'extra': 1}]) is_error=True
+{"tool": "write_memory", "error": "invalid arguments", "details": [{"loc": "images.0.extra", "msg": "Extra inputs are not permitted"}]}
+--- write_memory(text='x', scope='team') is_error=True
+{"tool": "write_memory", "error": "invalid arguments", "details": [{"loc": "scope", "msg": "Input should be 'global' or 'session'"}]}
+--- write_memory(text='cup is blue\nsecond line\n\nthird', images=[{'path': 'imgs/a.png', 'description': 'the [cup]'}]) is_error=False
+Written to sessions/e71172bc446540cb8713ea94d9d708b7/memory/MEMORY.md:
+- cup is blue
+  second line
+
+  third
+  ![the [cup)](sessions/e71172bc446540cb8713ea94d9d708b7/memory/asset/4df179beae11055be6624c337a44575e94cc476ab7f86051e87e15ddfcb4e4de.png)
+--- write_memory(text='global fact about trays', scope='global') is_error=False
+Written to memory/MEMORY.md:
+- global fact about trays
+--- search_memory(query='cup') is_error=False
+[session] - cup is blue
+  second line
+
+  third
+  ![the [cup)](sessions/e71172bc446540cb8713ea94d9d708b7/memory/asset/4df179beae11055be6624c337a44575e94cc476ab7f86051e87e15ddfcb4e4de.png)
+    image sessions/e71172bc446540cb8713ea94d9d708b7/memory/asset/4df179beae11055be6624c337a44575e94cc476ab7f86051e87e15ddfcb4e4de.png: the [cup]
+--- search_memory(query='trays', limit=0) is_error=False
+[global] - global fact about trays
+--- search_memory(query='"') is_error=False
+No memory entry matches '"'.
+--- search_memory(query='nothing-here') is_error=False
+No memory entry matches 'nothing-here'.
+session MEMORY.md:
+- cup is blue
+  second line
+
+  third
+  ![the [cup)](sessions/e71172bc446540cb8713ea94d9d708b7/memory/asset/4df179beae11055be6624c337a44575e94cc476ab7f86051e87e15ddfcb4e4de.png)
+

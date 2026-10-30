@@ -1,0 +1,52 @@
+index_text 'UR5机械臂' -> 'UR5 机 械 臂 '
+index_text '用户偏好，颜色' -> ' 用 户 偏 好 ， 颜 色 '
+index_text '版本v2发布' -> ' 版 本 v2 发 布 '
+q='机械臂'            expr='"机" AND "械" AND "臂"'                    -> [('global', 0)]
+q='UR5机械臂'         expr='"UR5机械臂"'                               -> []
+q='机械臂UR5'         expr='"机" AND "械" AND "臂" AND "UR5"'          -> [('global', 0)]
+q='UR5 机械臂'        expr='"UR5" AND "机" AND "械" AND "臂"'          -> [('global', 0)]
+q='偏好'             expr='"偏" AND "好"'                            -> [('S1', 0), ('global', 1)]
+q='偏好，颜色'          expr='"偏" AND "好" AND "，颜色"'                  -> []
+q='偏好 颜色'          expr='"偏" AND "好" AND "颜" AND "色"'            -> [('global', 1)]
+q='偏好。'            expr='"偏" AND "好" AND "。"'                    -> []
+q='（偏好）'           expr='"（偏好）"'                                 -> []
+q='版本v2'           expr='"版" AND "本" AND "v2"'                   -> [('global', 5)]
+q='v2发布'           expr='"v2发布"'                                 -> []
+q='robot'          expr='"robot"'                                -> []
+q='ROBOTS'         expr='"ROBOTS"'                               -> [('global', 2)]
+q='cafe'           expr='"cafe"'                                 -> [('global', 3)]
+q='hello,world'    expr='"hello,world"'                          -> [('global', 4)]
+q='world,hello'    expr='"world,hello"'                          -> []
+q='hello world'    expr='"hello" AND "world"'                    -> [('global', 4)]
+q='***'            expr='"***"'                                  -> []
+q='-'              expr='"-"'                                    -> []
+q='"'              expr='""""'                                   -> []
+q='。'              expr='"。"'                                    -> []
+q='AND'            expr='"AND"'                                  -> [('global', 8)]
+q='NOT'            expr='"NOT"'                                  -> [('global', 8)]
+q='OR'             expr='"OR"'                                   -> [('global', 8)]
+q='NEAR'           expr='"NEAR"'                                 -> []
+q='('              expr='"("'                                    -> []
+q='a*'             expr='"a*"'                                   -> []
+q='^hello'         expr='"^hello"'                               -> [('global', 4)]
+q=''               expr=None                                     -> []
+q='   '            expr=None                                     -> []
+q='カタカナ'           expr='"カ" AND "タ" AND "ナ"'                    -> [('global', 6)]
+q='한국'             expr='"한" AND "국"'                            -> [('global', 7)]
+memory search '\x00' could not be parsed: unterminated string
+q='\x00'           expr='"\x00"'                                 -> []
+q='ab\ud800'       expr='"ab\ud800"'                             -> builtins.UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 3: surrogates not allowed
+scopes=[] ()
+scope S1 only [('S1', 0)]
+limit=1 1
+limit=0 0
+limit=-1 2
+after replace old 机械臂 ()
+after replace new [('global', 0, '新的条目')]
+empty entries -> digest d3 hits ()
+digest never indexed None
+asset upsert [('memory/asset/x.png', 'h2', '', '')]
+remove [] 0
+remove other scope 0
+remove 1
+fts integrity []

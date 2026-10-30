@@ -1,0 +1,5 @@
+after cancel: title orig | lock free True
+update(A) returned title B | update(B) returned B
+delete between write and read-back: ['NoneType', 'NoneType', 'AssertionError']
+check-then-act: ['NoneType', 'NoneType', 'RunRecord']
+runs left for deleted session: [('running',)] | session row: (0,)

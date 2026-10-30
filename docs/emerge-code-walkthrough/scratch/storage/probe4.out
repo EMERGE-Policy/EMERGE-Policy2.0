@@ -1,0 +1,43 @@
+[code_path 'v007'] 'code/N/v7.py'
+[code_path '7'] 'code/N/v7.py'
+[code_path ''] ValueError: generated code version '' cannot name a file
+[code_path 'a/b'] ValueError: generated code version 'a/b' cannot name a file
+[code_path 'a\\b'] ValueError: generated code version 'a\\b' cannot name a file
+[code_path 'beta'] 'code/N/vbeta.py'
+[code_path '-1'] 'code/N/v-1.py'
+[code_path 'v'] 'code/N/vv.py'
+[code_path '..'] 'code/N/v...py'
+[code_path 'V2'] 'code/N/vV2.py'
+[code_path name '../x'] 'code/../x/v1.py'
+[list_generated_versions] ('9', '10', '10', '', 'alpha', 'beta')
+[list missing type] ()
+[read version ''] ValueError: generated code version '' cannot name a file
+[read missing version] FileNotFoundError: [Errno 2] No such file or directory: '/data/yuqingchi/tmp/emerge-code-walkthrough/scratch/storage/tmp/art/code/N/v99.py'
+[write overwrites v9] 'new'
+[memory_dir global] 'memory'
+[memory_dir session] 'sessions/abc/memory'
+[memory_dir '../x'] 'sessions/../x/memory'
+[memory_dir ''] 'sessions/memory'
+copies memory/asset/075f8e3f22fcb592f1c27b086375ceeaacc767bd43a4583cffd38685d3a1d9bb.png True memory/asset/075f8e3f22fcb592f1c27b086375ceeaacc767bd43a4583cffd38685d3a1d9bb.jpg memory/asset/075f8e3f22fcb592f1c27b086375ceeaacc767bd43a4583cffd38685d3a1d9bb sessions/S1/memory/asset/075f8e3f22fcb592f1c27b086375ceeaacc767bd43a4583cffd38685d3a1d9bb.png
+files in global asset ['d3a1d9bb', 'd9bb.jpg', 'd9bb.png']
+[copy missing source] FileNotFoundError: [Errno 2] No such file or directory: '/data/yuqingchi/tmp/emerge-code-walkthrough/scratch/storage/tmp/nope.png'
+[copy directory source] IsADirectoryError: [Errno 21] Is a directory: '/data/yuqingchi/tmp/emerge-code-walkthrough/scratch/storage/tmp'
+[copy relative source (resolved against cwd)] 'memory/asset/075f8e3f22fcb592f1c27b086375ceeaacc767bd43a4583cffd38685d3a1d9bb.png'
+existing target kept as is: b'tampered'
+[ref_dir] 'runs/R/nodes/cam/i1/image/3'
+[Ref key '..'] ValidationError: 1 validation error for Ref
+key
+  Value error, ref key '..' must not be '.' or '..' or contain '/', '\' [type=value_error, input_value='..', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/value_error
+[Ref key 'a/b'] ValidationError: 1 validation error for Ref
+key
+  Value error, ref key 'a/b' must not be '.' or '..' or contain '/', '\' [type=value_error, input_value='a/b', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.14/v/value_error
+[Ref producer_instance 'a/b'] '/data/yuqingchi/tmp/emerge-code-walkthrough/scratch/storage/tmp/art/runs/R/nodes/cam/a/../../image/k'
+[node_dir raw] 'runs/R/nodes/n/i'
+[ensure_node_dir with a file in the way] NotADirectoryError: [Errno 20] Not a directory: '/data/yuqingchi/tmp/emerge-code-walkthrough/scratch/storage/tmp/art/runs/R/nodes/n/i'
+S1 gone entirely True S2 kept True
+missing session dir: no error
+empty id removes sessions/ itself: True
+dump_json {"中文":1.0,"t":[1,2],"n":null}
+[dump_json nan] 'NaN'

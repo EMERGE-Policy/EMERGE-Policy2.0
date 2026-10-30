@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "/data/yuqingchi/tmp/emerge-code-walkthrough/scratch/storage/probe2.py", line 110, in <module>
+    asyncio.run(coro)
+  File "/data/yuqingchi/miniconda3/envs/EmergePolicy2.0/lib/python3.12/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/data/yuqingchi/miniconda3/envs/EmergePolicy2.0/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/yuqingchi/miniconda3/envs/EmergePolicy2.0/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/data/yuqingchi/tmp/emerge-code-walkthrough/scratch/storage/probe2.py", line 49, in uncaught
+    await open_storage(ws)
+  File "/data/yuqingchi/Code/EMERGE-Policy2.0/emerge/storage/base.py", line 455, in open_storage
+    return await SqliteStorage.open(Path(workspace), port_buffer=port_buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/yuqingchi/Code/EMERGE-Policy2.0/emerge/storage/sqlite.py", line 252, in open
+    await storage._init_schema()
+  File "/data/yuqingchi/Code/EMERGE-Policy2.0/emerge/storage/sqlite.py", line 264, in _init_schema
+    raise StorageError(
+emerge.exceptions.StorageError: /data/yuqingchi/tmp/emerge-code-walkthrough/scratch/storage/tmp/v1u/.emerge/state.db has schema version 1, written by older code; schema 2 is not migrated to, so move the file away to start a new one

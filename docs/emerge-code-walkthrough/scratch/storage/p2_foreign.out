@@ -1,0 +1,2 @@
+sqlite3.OperationalError: no such column: session_id
+main returned

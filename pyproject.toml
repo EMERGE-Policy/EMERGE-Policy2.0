@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "emerge"
+version = "0.1.0"
+description = "EMERGE-Policy 2.0: a main agent that builds and modifies graphs executed by a background runtime"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7,<3",
+    "openai>=1.35,<2",
+    "anthropic>=1.15,<2",
+    "prompt_toolkit>=3.0,<4",
+    "rich>=13.0,<14",
+    "aiosqlite>=0.20,<1",
+]
+
+[project.scripts]
+emerge = "emerge.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["emerge"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+
+[tool.hatch.build.force-include]
+"emerge/workspace_template" = "emerge/workspace_template"
+"emerge/agent/prompts" = "emerge/agent/prompts"
+
+[tool.hatch.build.targets.sdist]
+include = ["emerge", "README.md", "pyproject.toml"]

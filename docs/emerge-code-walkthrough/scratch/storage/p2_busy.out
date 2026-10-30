@@ -1,0 +1,2 @@
+second connection read: sqlite3.OperationalError: database is locked after 5.01 s
+main returned

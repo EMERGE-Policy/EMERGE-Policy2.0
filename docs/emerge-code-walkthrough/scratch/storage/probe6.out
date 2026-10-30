@@ -1,0 +1,8 @@
+page_size 4096
+wal_autocheckpoint 20000
+journal_size_limit 67108864
+synchronous 1
+foreign_keys 1
+busy_timeout 5000
+aclose OperationalError: database table is locked | writer: ValueError: no active connection
+title in db: [('orig', 'idle')]

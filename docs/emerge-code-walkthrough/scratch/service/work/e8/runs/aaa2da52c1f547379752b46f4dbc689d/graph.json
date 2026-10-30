@@ -1,0 +1,11 @@
+{
+  "format": "emerge.graph-spec/v1",
+  "graph_version": 0,
+  "nodes": {
+    "b": {
+      "type": "busy",
+      "description": "",
+      "params": {"duration": 1.0}
+    }
+  }
+}

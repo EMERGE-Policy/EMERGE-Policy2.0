@@ -1,0 +1,142 @@
+{
+  "format": "emerge.graph-spec/v1",
+  "nodes": {
+    "observe_scene": {
+      "type": "scene_observer",
+      "description": "识别苹果、香蕉、暂存台和冰箱，输出操作目标",
+      "params": {
+        "targets": ["apple", "banana", "staging_table", "fridge"]
+      }
+    },
+    "left_pick_apple": {
+      "type": "arm_pick",
+      "description": "左臂抓取苹果，与右臂抓取香蕉并行",
+      "params": {"arm": "left"},
+      "inputs": {"target": "observe_scene.apple"},
+      "start_when": {
+        "any_of": [{"all_of": {"observe_scene": "success"}}]
+      }
+    },
+    "right_pick_banana": {
+      "type": "arm_pick",
+      "description": "右臂抓取香蕉，与左臂抓取苹果并行",
+      "params": {"arm": "right"},
+      "inputs": {"target": "observe_scene.banana"},
+      "start_when": {
+        "any_of": [{"all_of": {"observe_scene": "success"}}]
+      }
+    },
+    "left_check_grasp": {
+      "type": "grasp_check",
+      "description": "根据实时反馈确认左臂已抓稳苹果",
+      "params": {"arm": "left", "expected_object": "apple"},
+      "inputs": {"pick_result": "left_pick_apple.result"},
+      "start_when": {
+        "any_of": [{"all_of": {"left_pick_apple": "success"}}]
+      }
+    },
+    "right_check_grasp": {
+      "type": "grasp_check",
+      "description": "根据实时反馈确认右臂已抓稳香蕉",
+      "params": {"arm": "right", "expected_object": "banana"},
+      "inputs": {"pick_result": "right_pick_banana.result"},
+      "start_when": {
+        "any_of": [{"all_of": {"right_pick_banana": "success"}}]
+      }
+    },
+    "left_stage_apple": {
+      "type": "arm_place",
+      "description": "两边抓取均确认成功后，将苹果放到暂存台左侧并释放夹爪",
+      "params": {"arm": "left", "slot": "left"},
+      "inputs": {
+        "held_object": "left_check_grasp.held_object",
+        "destination": "observe_scene.staging_table"
+      },
+      "start_when": {
+        "any_of": [{"all_of": {
+          "left_check_grasp": "success",
+          "right_check_grasp": "success"
+        }}]
+      }
+    },
+    "right_stage_banana": {
+      "type": "arm_place",
+      "description": "两边抓取均确认成功后，将香蕉放到暂存台右侧并释放夹爪",
+      "params": {"arm": "right", "slot": "right"},
+      "inputs": {
+        "held_object": "right_check_grasp.held_object",
+        "destination": "observe_scene.staging_table"
+      },
+      "start_when": {
+        "any_of": [{"all_of": {
+          "left_check_grasp": "success",
+          "right_check_grasp": "success"
+        }}]
+      }
+    },
+    "open_fridge_together": {
+      "type": "dual_arm_open_fridge",
+      "description": "两臂均完成暂放后，由同一协调节点控制双臂开门",
+      "params": {
+        "left_arm_role": "stabilize",
+        "right_arm_role": "pull_door"
+      },
+      "inputs": {
+        "fridge": "observe_scene.fridge",
+        "left_ready": "left_stage_apple.result",
+        "right_ready": "right_stage_banana.result"
+      },
+      "start_when": {
+        "any_of": [{"all_of": {
+          "left_stage_apple": "success",
+          "right_stage_banana": "success"
+        }}]
+      }
+    },
+    "check_fridge_open": {
+      "type": "fridge_open_check",
+      "description": "根据实时反馈检查冰箱门是否确实打开",
+      "params": {},
+      "inputs": {
+        "fridge": "observe_scene.fridge",
+        "open_result": "open_fridge_together.result"
+      },
+      "start_when": {
+        "any_of": [{"all_of": {"open_fridge_together": "success"}}]
+      }
+    },
+    "report_success": {
+      "type": "task_report",
+      "description": "向主 Agent 汇报抓取、暂放和开冰箱均已完成",
+      "params": {
+        "status": "success",
+        "message": "苹果和香蕉已暂放台面，冰箱门已确认打开。"
+      },
+      "inputs": {"result": "check_fridge_open.result"},
+      "start_when": {
+        "any_of": [{"all_of": {"check_fridge_open": "success"}}]
+      }
+    },
+    "report_failure": {
+      "type": "task_report",
+      "description": "任一业务步骤明确返回 failure 时通知主 Agent 重新规划",
+      "params": {
+        "status": "failure",
+        "message": "某个步骤明确报告失败，请查询节点状态与结局原因后安排后续动作。"
+      },
+      "start_when": {
+        "any_of": [
+          {"all_of": {"observe_scene": "failure"}},
+          {"all_of": {"left_pick_apple": "failure"}},
+          {"all_of": {"right_pick_banana": "failure"}},
+          {"all_of": {"left_check_grasp": "failure"}},
+          {"all_of": {"right_check_grasp": "failure"}},
+          {"all_of": {"left_stage_apple": "failure"}},
+          {"all_of": {"right_stage_banana": "failure"}},
+          {"all_of": {"open_fridge_together": "failure"}},
+          {"all_of": {"check_fridge_open": "failure"}}
+        ]
+      }
+    }
+  }
+}

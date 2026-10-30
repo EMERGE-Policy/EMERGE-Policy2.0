@@ -1,0 +1,16 @@
+{
+  "format": "emerge.graph-spec/v1",
+  "graph_version": 0,
+  "nodes": {
+    "v": {
+      "type": "verdict",
+      "description": "",
+      "params": {"duration": 30}
+    },
+    "a": {
+      "type": "asker",
+      "description": "",
+      "params": {}
+    }
+  }
+}

@@ -1,0 +1,5 @@
+
+---
+name: leading-blank
+---
+body

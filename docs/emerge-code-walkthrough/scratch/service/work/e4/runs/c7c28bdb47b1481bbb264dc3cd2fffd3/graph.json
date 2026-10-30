@@ -1,0 +1,11 @@
+{
+  "format": "emerge.graph-spec/v1",
+  "graph_version": 1,
+  "nodes": {
+    "v": {
+      "type": "verdict",
+      "description": "d",
+      "params": {"duration": 5}
+    }
+  }
+}

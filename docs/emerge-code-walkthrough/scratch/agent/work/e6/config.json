@@ -1,0 +1,47 @@
+{
+  "providers": {
+    "openai": {
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "your-openai-key",
+      "options": {
+        "reasoning_summary": "auto"
+      }
+    },
+    "anthropic": {
+      "base_url": "https://api.anthropic.com/v1",
+      "api_key": "your-anthropic-key",
+      "options": {
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
+        }
+      }
+    }
+  },
+  "model": {
+    "provider": "openai",
+    "api_mode": "responses",
+    "name": "gpt-6.1-sol",
+    "limit": {
+      "context": 1050000,
+      "output": 128000
+    },
+    "options": {
+      "temperature": 0.0,
+      "max_output_tokens": 128000,
+      "reasoning_effort": "xhigh",
+      "speed": "standard"
+    }
+  },
+  "agent": {
+    "max_context_tokens": 1000000,
+    "compact_threshold": 0.8,
+    "max_retries": 3,
+    "limits": {}
+  },
+  "runtime": {
+    "stop_timeout": 30,
+    "port_buffer": 64
+  },
+  "nodes": []
+}
