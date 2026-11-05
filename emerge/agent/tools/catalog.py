@@ -27,7 +27,7 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
     @tool
     def describe_node_type(name: str, version: str | None = None) -> str:
         """Everything about one node type: ports and their type tags, the parameter schema, the
-        outcomes it declares, whether it acts irreversibly, what it reads directly, and where its
+        outcomes it declares, whether it acts on the environment, what it reads directly, and where its
         code comes from.
 
         Args:
@@ -75,8 +75,8 @@ def _line(entry: NodeEntry) -> str:
         parts.append("inputs: " + ", ".join(f"{port.name} ({port.type_tag})" for port in entry.inputs))
     if entry.outputs:
         parts.append("outputs: " + ", ".join(f"{port.name} ({port.type_tag})" for port in entry.outputs))
-    if entry.irreversible:
-        parts.append("IRREVERSIBLE: acts on the environment")
+    if entry.acts_on_environment:
+        parts.append("ACTS ON THE ENVIRONMENT")
     if entry.version is not None:
         parts.append(f"generated code, version {entry.version}")
     return "- " + "; ".join(parts)

@@ -1,17 +1,18 @@
 """Persistence: the SQLite database, the workspace layout, and the shapes stored values take.
 
 `base.Storage` is what the rest of the package depends on; `sqlite.SqliteStorage` is the one
-implementation. `artifacts` owns the workspace paths, so nothing else builds one by hand.
+implementation, one database per conversation. `artifacts` owns the workspace paths, so nothing
+else builds one by hand.
 """
 
 from emerge.storage.artifacts import (
-    GLOBAL_SCOPE,
+    code_dir,
     code_path,
     copy_memory_asset,
-    ensure_memory_dir,
     ensure_node_dir,
     ensure_run_dir,
     graph_file,
+    list_generated_names,
     list_generated_versions,
     memory_asset_dir,
     memory_dir,
@@ -19,10 +20,12 @@ from emerge.storage.artifacts import (
     node_dir,
     read_generated_code,
     ref_dir,
-    remove_session_memory,
     run_dir,
     runs_dir,
+    session_dir,
+    sessions_dir,
     state_db_path,
+    trace_file,
     write_generated_code,
 )
 from emerge.storage.base import (
@@ -36,14 +39,15 @@ from emerge.storage.base import (
     RunRecord,
     RunState,
     SessionRecord,
+    SessionSummary,
     Storage,
     StoredMessage,
     open_storage,
+    read_session,
 )
 from emerge.storage.sqlite import SCHEMA_VERSION, SqliteStorage
 
 __all__ = [
-    "GLOBAL_SCOPE",
     "SCHEMA_VERSION",
     "AskRecord",
     "MemoryAsset",
@@ -55,15 +59,17 @@ __all__ = [
     "RunRecord",
     "RunState",
     "SessionRecord",
+    "SessionSummary",
     "SqliteStorage",
     "Storage",
     "StoredMessage",
+    "code_dir",
     "code_path",
     "copy_memory_asset",
-    "ensure_memory_dir",
     "ensure_node_dir",
     "ensure_run_dir",
     "graph_file",
+    "list_generated_names",
     "list_generated_versions",
     "memory_asset_dir",
     "memory_dir",
@@ -71,10 +77,13 @@ __all__ = [
     "node_dir",
     "open_storage",
     "read_generated_code",
+    "read_session",
     "ref_dir",
-    "remove_session_memory",
     "run_dir",
     "runs_dir",
+    "session_dir",
+    "sessions_dir",
     "state_db_path",
+    "trace_file",
     "write_generated_code",
 ]

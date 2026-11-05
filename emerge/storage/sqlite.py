@@ -1,9 +1,10 @@
 """The SQLite implementation of `Storage`.
 
-One database file, one connection, one transaction per write. Every call takes the same lock, so a
-multi-step write (compaction, replacing one scope's memory entries, handing out a timeline number
-and storing the message stamped with it) is never interleaved with another call's statements, and a
-reader never sees half of one. Writers wait on each other, which is what SQLite does anyway.
+One conversation per database file, kept in the conversation's folder. One connection, one
+transaction per write. Every call takes the same lock, so a multi-step write (compaction, replacing
+the memory entries, handing out a timeline number and storing the message stamped with it) is never
+interleaved with another call's statements, and a reader never sees half of one. Writers wait on
+each other, which is what SQLite does anyway.
 
 The schema version lives in `PRAGMA user_version`. Values that belong to one row are columns;
 graphs, messages and snapshots are JSON text, written by `artifacts.dump_model` and read back into
@@ -44,32 +45,32 @@ from emerge.storage.base import (
     RunRecord,
     RunState,
     SessionRecord,
+    SessionSummary,
     Storage,
     StoredMessage,
 )
 
 logger = logging.getLogger(__name__)
 
-# 2 added `queued_node_messages` and `runs.paused`. Older databases are not migrated.
-SCHEMA_VERSION = 2
+# 3 keeps one conversation per database. Older databases are not migrated.
+SCHEMA_VERSION = 3
 
 # Pages in the WAL before SQLite checkpoints on its own (about 80 MB at 4 KiB pages), and the size
 # the WAL is cut back to after a checkpoint. See `SqliteStorage.open`.
 _WAL_AUTOCHECKPOINT = 20_000
 _WAL_SIZE_LIMIT = 64 * 1024 * 1024
 
-_RUNNING_STATES = ("running", "idle", "paused")
-# Runs that were closed with the session. Only these may be left behind when the session goes.
-_CLOSED_RUN_STATE = "closed"
-# Statuses a run may still reach; anything else means it is a record of something over.
-_OPEN_RUN_STATES = frozenset(_RUNNING_STATES) | {_CLOSED_RUN_STATE}
+# Statuses a run may still leave (`closed` with the session, to be carried on); any other status
+# means it is a record of something over.
+_OPEN_RUN_STATES = frozenset({"running", "idle", "paused", "closed"})
 
 # Runs of characters that get indexed one character at a time: Chinese, Japanese kana, Hangul.
 _CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]+")
 _TOKEN_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]+|[^\s]+")
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS sessions (
+-- The one session this database belongs to.
+CREATE TABLE IF NOT EXISTS session (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'idle',
@@ -83,35 +84,28 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE TABLE IF NOT EXISTS messages (
-    session_id TEXT NOT NULL,
-    seq INTEGER NOT NULL,
+    seq INTEGER PRIMARY KEY,
     turn INTEGER NOT NULL,
     message TEXT NOT NULL,
     is_summary INTEGER NOT NULL DEFAULT 0,
     is_compacted INTEGER NOT NULL DEFAULT 0,
     is_discarded INTEGER NOT NULL DEFAULT 0,
-    created_at REAL NOT NULL,
-    PRIMARY KEY (session_id, seq)
+    created_at REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_messages_turn ON messages (session_id, turn);
+CREATE INDEX IF NOT EXISTS ix_messages_turn ON messages (turn);
 
 CREATE TABLE IF NOT EXISTS pending_inputs (
-    session_id TEXT NOT NULL,
-    seq INTEGER NOT NULL,
+    seq INTEGER PRIMARY KEY,
     message TEXT NOT NULL,
-    received_at REAL NOT NULL,
-    PRIMARY KEY (session_id, seq)
+    received_at REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS memory_entries (
-    scope TEXT NOT NULL,
-    position INTEGER NOT NULL,
+    position INTEGER PRIMARY KEY,
     text TEXT NOT NULL,
     -- The same text with CJK characters separated, so the tokenizer keeps them apart.
-    index_text TEXT NOT NULL,
-    PRIMARY KEY (scope, position)
+    index_text TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_memory_entries_scope ON memory_entries (scope);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_entries_fts USING fts5(
     index_text,
@@ -127,24 +121,22 @@ CREATE TRIGGER IF NOT EXISTS memory_entries_ad AFTER DELETE ON memory_entries BE
 END;
 
 CREATE TABLE IF NOT EXISTS memory_assets (
-    scope TEXT NOT NULL,
-    path TEXT NOT NULL,
+    path TEXT PRIMARY KEY,
     digest TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL DEFAULT '',
-    added_at REAL NOT NULL,
-    PRIMARY KEY (scope, path)
+    added_at REAL NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS memory_files (
-    scope TEXT PRIMARY KEY,
+-- The MEMORY.md content the index was last built from: one row at most.
+CREATE TABLE IF NOT EXISTS memory_file (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
     digest TEXT NOT NULL,
     indexed_at REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'running',
     content_time INTEGER NOT NULL DEFAULT 0,
     graph_file_digest TEXT,
@@ -152,7 +144,6 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at REAL NOT NULL,
     finished_at REAL
 );
-CREATE INDEX IF NOT EXISTS ix_runs_session ON runs (session_id);
 
 CREATE TABLE IF NOT EXISTS graphs (
     run_id TEXT PRIMARY KEY,
@@ -210,9 +201,8 @@ CREATE TABLE IF NOT EXISTS queued_node_messages (
     PRIMARY KEY (run_id, instance_id, seq)
 );
 
--- Monotonic counters: per-session message numbers and per-run timeline numbers. Kept apart from
--- the rows they number so that a number handed out is never handed out twice, not even after rows
--- were deleted.
+-- Monotonic counters: message numbers and per-run timeline numbers. Kept apart from the rows they
+-- number so that a number handed out is never handed out twice, not even after rows were deleted.
 CREATE TABLE IF NOT EXISTS counters (
     key TEXT PRIMARY KEY,
     value INTEGER NOT NULL
@@ -223,19 +213,18 @@ CREATE TABLE IF NOT EXISTS counters (
 class SqliteStorage(Storage):
     """The only implementation. Open it with `open_storage()` or `SqliteStorage.open()`."""
 
-    def __init__(self, workspace: Path, conn: aiosqlite.Connection, *, port_buffer: int) -> None:
-        self.workspace = workspace
+    def __init__(self, session_dir: Path, conn: aiosqlite.Connection, *, port_buffer: int) -> None:
+        self.session_dir = session_dir
         self._conn = conn
         self.port_buffer = port_buffer
         self._lock = asyncio.Lock()
 
     @classmethod
-    async def open(cls, workspace: Path, *, port_buffer: int = 64) -> "SqliteStorage":
+    async def open(cls, session_dir: Path, *, port_buffer: int = 64) -> "SqliteStorage":
         if port_buffer < 1:
             raise StorageError(f"port_buffer must be at least 1, got {port_buffer}")
-        workspace = Path(workspace).resolve()
-        workspace.mkdir(parents=True, exist_ok=True)
-        path = artifacts.state_db_path(workspace)
+        session_dir = Path(session_dir).resolve()
+        path = artifacts.state_db_path(session_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = await aiosqlite.connect(path, isolation_level=None)
         conn.row_factory = aiosqlite.Row
@@ -248,40 +237,26 @@ class SqliteStorage(Storage):
         # checkpoints are rare on purpose and the WAL is truncated when the storage is closed.
         await conn.execute(f"PRAGMA wal_autocheckpoint={_WAL_AUTOCHECKPOINT}")
         await conn.execute(f"PRAGMA journal_size_limit={_WAL_SIZE_LIMIT}")
-        storage = cls(workspace, conn, port_buffer=port_buffer)
-        await storage._init_schema()
+        storage = cls(session_dir, conn, port_buffer=port_buffer)
+        try:
+            await storage._init_schema()
+        except BaseException:
+            await conn.close()
+            raise
         return storage
 
     async def _init_schema(self) -> None:
         row = await self._fetch_one("PRAGMA user_version")
         version = int(row[0])
-        if version > SCHEMA_VERSION:
+        if version not in (0, SCHEMA_VERSION):
             raise StorageError(
-                f"{artifacts.state_db_path(self.workspace)} has schema version {version}; "
-                f"this code understands {SCHEMA_VERSION}"
-            )
-        if 0 < version < SCHEMA_VERSION:
-            raise StorageError(
-                f"{artifacts.state_db_path(self.workspace)} has schema version {version}, written by older "
-                f"code; schema {SCHEMA_VERSION} is not migrated to, so move the file away to start a new one"
+                f"{artifacts.state_db_path(self.session_dir)} has schema version {version}; this code reads "
+                f"only {SCHEMA_VERSION} and migrates nothing"
             )
         # executescript commits on its own, so it runs outside the transaction helper.
         await self._conn.executescript(_SCHEMA)
         async with self._transaction():
             await self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-            if version < SCHEMA_VERSION:
-                # A new database, or one written before the counters table existed: carry on from
-                # whatever the stored rows already used.
-                for key, sql in (
-                    ("session_seq", "SELECT COALESCE(MAX(seq), 0) FROM messages"),
-                    ("pending_seq", "SELECT COALESCE(MAX(seq), 0) FROM pending_inputs"),
-                    ("ask_seq", "SELECT COALESCE(MAX(CAST(substr(id, 4) AS INTEGER)), 0) FROM asks"),
-                ):
-                    rows = await self._raw_fetch(sql)
-                    await self._conn.execute(
-                        "INSERT INTO counters (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
-                        (key, int(rows[0][0])),
-                    )
 
     # -- plumbing -----------------------------------------------------------
 
@@ -326,38 +301,42 @@ class SqliteStorage(Storage):
         row = await (await self._conn.execute("SELECT value FROM counters WHERE key = ?", (key,))).fetchone()
         return int(row[0])
 
-    async def _require_session(self, session_id: str) -> None:
-        if await self._raw_one("SELECT 1 FROM sessions WHERE id = ?", (session_id,)) is None:
-            raise StorageError(f"session {session_id!r} does not exist")
+    async def _require_session(self) -> None:
+        if await self._raw_one("SELECT 1 FROM session") is None:
+            raise StorageError(f"{artifacts.state_db_path(self.session_dir)} holds no session yet")
 
     async def _require_run(self, run_id: str) -> None:
         if await self._raw_one("SELECT 1 FROM runs WHERE id = ?", (run_id,)) is None:
             raise StorageError(f"run {run_id!r} does not exist")
 
     async def aclose(self) -> None:
-        # Fold the WAL back into the database file before letting go, so a closed workspace is one
+        # Fold the WAL back into the database file before letting go, so a closed conversation is one
         # file and the next open starts clean.
         try:
             await self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         finally:
             await self._conn.close()
 
-    # -- sessions -----------------------------------------------------------
+    # -- the session --------------------------------------------------------
 
     async def create_session(
         self,
+        session_id: str,
         *,
         title: str = "",
         system: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> SessionRecord:
-        session_id = uuid.uuid4().hex
         now = time.time()
         # Serialize first: a metadata value that is not JSON has to be reported here, not at read time.
         metadata_text = artifacts.dump_json(dict(metadata or {}))
         async with self._transaction():
+            existing = await self._raw_one("SELECT id FROM session")
+            if existing is not None:
+                path = artifacts.state_db_path(self.session_dir)
+                raise StorageError(f"{path} already holds session {existing['id']!r}")
             await self._conn.execute(
-                "INSERT INTO sessions (id, title, status, system, current_run_id, intent_count, usage, "
+                "INSERT INTO session (id, title, status, system, current_run_id, intent_count, usage, "
                 "metadata, created_at, updated_at) VALUES (?, ?, 'idle', ?, NULL, 0, ?, ?, ?, ?)",
                 (session_id, title, system, artifacts.dump_model(Usage()), metadata_text, now, now),
             )
@@ -374,21 +353,12 @@ class SqliteStorage(Storage):
             updated_at=now,
         )
 
-    async def get_session(self, session_id: str) -> SessionRecord | None:
-        row = await self._fetch_one("SELECT * FROM sessions WHERE id = ?", (session_id,))
+    async def get_session(self) -> SessionRecord | None:
+        row = await self._fetch_one("SELECT * FROM session")
         return _session(row) if row else None
-
-    async def list_sessions(self, *, limit: int | None = None) -> tuple[SessionRecord, ...]:
-        sql = "SELECT * FROM sessions ORDER BY updated_at DESC, id DESC"
-        params: tuple[Any, ...] = ()
-        if limit is not None:
-            sql += " LIMIT ?"
-            params = (limit,)
-        return tuple(_session(row) for row in await self._fetch(sql, params))
 
     async def update_session(
         self,
-        session_id: str,
         *,
         title: str | None = None,
         status: str | None = None,
@@ -421,108 +391,72 @@ class SqliteStorage(Storage):
         sets.append("updated_at = ?")
         params.append(time.time())
         async with self._transaction():
-            await self._require_session(session_id)
-            await self._conn.execute(f"UPDATE sessions SET {', '.join(sets)} WHERE id = ?", (*params, session_id))
-        session = await self.get_session(session_id)
+            await self._require_session()
+            await self._conn.execute(f"UPDATE session SET {', '.join(sets)}", params)
+        session = await self.get_session()
         assert session is not None
         return session
 
-    async def set_system_snapshot(self, session_id: str, system: str) -> SessionRecord:
+    async def set_system_snapshot(self, system: str) -> SessionRecord:
         async with self._transaction():
-            await self._require_session(session_id)
-            await self._conn.execute(
-                "UPDATE sessions SET system = ?, updated_at = ? WHERE id = ?",
-                (system, time.time(), session_id),
-            )
-        session = await self.get_session(session_id)
+            await self._require_session()
+            await self._conn.execute("UPDATE session SET system = ?, updated_at = ?", (system, time.time()))
+        session = await self.get_session()
         assert session is not None
         return session
-
-    async def delete_session(self, session_id: str) -> None:
-        runs = await self.runs_of_session(session_id)
-        busy = [run for run in runs if run.status in _RUNNING_STATES]
-        if busy:
-            listed = ", ".join(f"{run.id} ({run.status})" for run in busy)
-            raise StorageError(f"session {session_id!r} still has open runs: {listed}")
-        async with self._transaction():
-            await self._require_session(session_id)
-            for table in ("messages", "pending_inputs"):
-                await self._conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (session_id,))
-            # The session's own memory scope; the global one is untouched.
-            for table in ("memory_entries", "memory_assets", "memory_files"):
-                await self._conn.execute(f"DELETE FROM {table} WHERE scope = ?", (session_id,))
-            # Its runs go with it: a run nothing points at is not a record of anything any more.
-            for run in runs:
-                for table in ("graphs", "node_states", "port_messages", "queued_node_messages"):
-                    await self._conn.execute(f"DELETE FROM {table} WHERE run_id = ?", (run.id,))
-                await self._conn.execute("DELETE FROM asks WHERE run_id = ?", (run.id,))
-                await self._conn.execute("DELETE FROM counters WHERE key = ?", (f"timeline:{run.id}",))
-                await self._conn.execute("DELETE FROM runs WHERE id = ?", (run.id,))
-            await self._conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
-        artifacts.remove_session_memory(self.workspace, session_id)
 
     # -- conversation -------------------------------------------------------
 
-    async def append_message(
-        self, session_id: str, turn: int, message: Message, *, summary: bool = False
-    ) -> StoredMessage:
+    async def append_message(self, turn: int, message: Message, *, summary: bool = False) -> StoredMessage:
         text = artifacts.dump_model(message)
         now = time.time()
         async with self._transaction():
-            await self._require_session(session_id)
-            seq = await self._counter("session_seq")
+            await self._require_session()
+            seq = await self._counter("message_seq")
             await self._conn.execute(
-                "INSERT INTO messages (session_id, seq, turn, message, is_summary, is_compacted, "
-                "is_discarded, created_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
-                (session_id, seq, turn, text, 1 if summary else 0, now),
+                "INSERT INTO messages (seq, turn, message, is_summary, is_compacted, is_discarded, created_at) "
+                "VALUES (?, ?, ?, ?, 0, 0, ?)",
+                (seq, turn, text, 1 if summary else 0, now),
             )
         return StoredMessage(seq=seq, turn=turn, message=message, summary=summary, created_at=now)
 
     async def compact_messages(
-        self, session_id: str, summary: Message, kept: Sequence[tuple[int, Message]]
+        self, summary: Message, kept: Sequence[tuple[int, Message]]
     ) -> tuple[StoredMessage, ...]:
         now = time.time()
         appended: list[StoredMessage] = []
         async with self._transaction():
-            await self._require_session(session_id)
+            await self._require_session()
             # Every row the conversation could have read becomes unreachable; the summary and the
             # kept turns take their place. Nothing is deleted.
+            await self._conn.execute("UPDATE messages SET is_compacted = 1 WHERE is_compacted = 0")
+            seq = await self._counter("message_seq")
             await self._conn.execute(
-                "UPDATE messages SET is_compacted = 1 WHERE session_id = ? AND is_compacted = 0",
-                (session_id,),
-            )
-            seq = await self._counter("session_seq")
-            await self._conn.execute(
-                "INSERT INTO messages (session_id, seq, turn, message, is_summary, is_compacted, "
-                "is_discarded, created_at) VALUES (?, ?, 0, ?, 1, 0, 0, ?)",
-                (session_id, seq, artifacts.dump_model(summary), now),
+                "INSERT INTO messages (seq, turn, message, is_summary, is_compacted, is_discarded, created_at) "
+                "VALUES (?, 0, ?, 1, 0, 0, ?)",
+                (seq, artifacts.dump_model(summary), now),
             )
             appended.append(StoredMessage(seq=seq, turn=0, message=summary, summary=True, created_at=now))
             for turn, message in kept:
-                seq = await self._counter("session_seq")
+                seq = await self._counter("message_seq")
                 await self._conn.execute(
-                    "INSERT INTO messages (session_id, seq, turn, message, is_summary, is_compacted, "
-                    "is_discarded, created_at) VALUES (?, ?, ?, ?, 0, 0, 0, ?)",
-                    (session_id, seq, turn, artifacts.dump_model(message), now),
+                    "INSERT INTO messages (seq, turn, message, is_summary, is_compacted, is_discarded, created_at) "
+                    "VALUES (?, ?, ?, 0, 0, 0, ?)",
+                    (seq, turn, artifacts.dump_model(message), now),
                 )
                 appended.append(StoredMessage(seq=seq, turn=turn, message=message, created_at=now))
         return tuple(appended)
 
-    async def discard_turn(self, session_id: str, turn: int) -> int:
+    async def discard_turn(self, turn: int) -> int:
         async with self._transaction():
             cursor = await self._conn.execute(
-                "UPDATE messages SET is_discarded = 1 "
-                "WHERE session_id = ? AND turn = ? AND is_compacted = 0 AND is_discarded = 0",
-                (session_id, turn),
+                "UPDATE messages SET is_discarded = 1 WHERE turn = ? AND is_compacted = 0 AND is_discarded = 0",
+                (turn,),
             )
             return cursor.rowcount
 
-    async def load_messages(self, session_id: str) -> tuple[StoredMessage, ...]:
-        rows = await self._fetch(
-            "SELECT * FROM messages WHERE session_id = ? AND is_compacted = 0 AND is_discarded = 0 "
-            "ORDER BY seq",
-            (session_id,),
-        )
+    async def load_messages(self) -> tuple[StoredMessage, ...]:
+        rows = await self._fetch("SELECT * FROM messages WHERE is_compacted = 0 AND is_discarded = 0 ORDER BY seq")
         start = 0
         for index, row in enumerate(rows):
             if row["is_summary"]:
@@ -531,25 +465,21 @@ class SqliteStorage(Storage):
 
     # -- queued user messages -----------------------------------------------
 
-    async def add_pending_input(self, session_id: str, message: Message) -> PendingInput:
+    async def add_pending_input(self, message: Message) -> PendingInput:
         text = artifacts.dump_model(message)
         now = time.time()
         async with self._transaction():
-            await self._require_session(session_id)
+            await self._require_session()
             seq = await self._counter("pending_seq")
             await self._conn.execute(
-                "INSERT INTO pending_inputs (session_id, seq, message, received_at) VALUES (?, ?, ?, ?)",
-                (session_id, seq, text, now),
+                "INSERT INTO pending_inputs (seq, message, received_at) VALUES (?, ?, ?)", (seq, text, now)
             )
-        return PendingInput(session_id=session_id, seq=seq, message=message, received_at=now)
+        return PendingInput(seq=seq, message=message, received_at=now)
 
-    async def pending_inputs(self, session_id: str) -> tuple[PendingInput, ...]:
-        rows = await self._fetch(
-            "SELECT * FROM pending_inputs WHERE session_id = ? ORDER BY seq", (session_id,)
-        )
+    async def pending_inputs(self) -> tuple[PendingInput, ...]:
+        rows = await self._fetch("SELECT * FROM pending_inputs ORDER BY seq")
         return tuple(
             PendingInput(
-                session_id=row["session_id"],
                 seq=row["seq"],
                 message=artifacts.load_model(Message, row["message"]),
                 received_at=row["received_at"],
@@ -557,58 +487,50 @@ class SqliteStorage(Storage):
             for row in rows
         )
 
-    async def remove_pending_input(self, session_id: str, seq: int) -> None:
+    async def remove_pending_input(self, seq: int) -> None:
         async with self._transaction():
-            await self._conn.execute(
-                "DELETE FROM pending_inputs WHERE session_id = ? AND seq = ?", (session_id, seq)
-            )
+            await self._conn.execute("DELETE FROM pending_inputs WHERE seq = ?", (seq,))
 
     # -- memory index -------------------------------------------------------
 
-    async def replace_memory_entries(
-        self, scope: str, entries: Sequence[str], file_digest: str
-    ) -> None:
+    async def replace_memory_entries(self, entries: Sequence[str], file_digest: str) -> None:
         now = time.time()
         async with self._transaction():
-            await self._conn.execute("DELETE FROM memory_entries WHERE scope = ?", (scope,))
+            await self._conn.execute("DELETE FROM memory_entries")
             await self._conn.executemany(
-                "INSERT INTO memory_entries (scope, position, text, index_text) VALUES (?, ?, ?, ?)",
-                [(scope, position, text, _index_text(text)) for position, text in enumerate(entries)],
+                "INSERT INTO memory_entries (position, text, index_text) VALUES (?, ?, ?)",
+                [(position, text, _index_text(text)) for position, text in enumerate(entries)],
             )
             await self._conn.execute(
-                "INSERT INTO memory_files (scope, digest, indexed_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(scope) DO UPDATE SET digest = excluded.digest, indexed_at = excluded.indexed_at",
-                (scope, file_digest, now),
+                "INSERT INTO memory_file (id, digest, indexed_at) VALUES (1, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET digest = excluded.digest, indexed_at = excluded.indexed_at",
+                (file_digest, now),
             )
 
-    async def search_memory(
-        self, query: str, scopes: Sequence[str], *, limit: int = 20
-    ) -> tuple[MemoryHit, ...]:
+    async def search_memory(self, query: str, *, limit: int = 20) -> tuple[MemoryHit, ...]:
         match = _match_expression(query)
-        if match is None or not scopes:
+        if match is None:
             return ()
-        placeholders = ", ".join("?" for _ in scopes)
         sql = (
-            "SELECT e.scope, e.position, e.text FROM memory_entries_fts f "
+            "SELECT e.position, e.text FROM memory_entries_fts f "
             "JOIN memory_entries e ON e.rowid = f.rowid "
-            f"WHERE memory_entries_fts MATCH ? AND e.scope IN ({placeholders}) "
-            "ORDER BY f.rank, e.scope, e.position LIMIT ?"
+            "WHERE memory_entries_fts MATCH ? "
+            "ORDER BY f.rank, e.position LIMIT ?"
         )
         try:
-            rows = await self._fetch(sql, (match, *scopes, limit))
+            rows = await self._fetch(sql, (match, limit))
         except aiosqlite.OperationalError as e:
             # A query made only of FTS5 syntax is not a search; it finds nothing.
             logger.warning("memory search %r could not be parsed: %s", query, e)
             return ()
-        return tuple(MemoryHit(scope=row["scope"], position=row["position"], text=row["text"]) for row in rows)
+        return tuple(MemoryHit(position=row["position"], text=row["text"]) for row in rows)
 
-    async def memory_file_digest(self, scope: str) -> str | None:
-        row = await self._fetch_one("SELECT digest FROM memory_files WHERE scope = ?", (scope,))
+    async def memory_file_digest(self) -> str | None:
+        row = await self._fetch_one("SELECT digest FROM memory_file")
         return row["digest"] if row else None
 
     async def add_memory_asset(
         self,
-        scope: str,
         path: str,
         digest: str,
         *,
@@ -618,23 +540,18 @@ class SqliteStorage(Storage):
         now = time.time()
         async with self._transaction():
             await self._conn.execute(
-                "INSERT INTO memory_assets (scope, path, digest, description, source, added_at) "
-                "VALUES (?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(scope, path) DO UPDATE SET digest = excluded.digest, "
+                "INSERT INTO memory_assets (path, digest, description, source, added_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(path) DO UPDATE SET digest = excluded.digest, "
                 "description = excluded.description, source = excluded.source, added_at = excluded.added_at",
-                (scope, path, digest, description, source, now),
+                (path, digest, description, source, now),
             )
-        return MemoryAsset(
-            scope=scope, path=path, digest=digest, description=description, source=source, added_at=now
-        )
+        return MemoryAsset(path=path, digest=digest, description=description, source=source, added_at=now)
 
-    async def memory_assets(self, scope: str) -> tuple[MemoryAsset, ...]:
-        rows = await self._fetch(
-            "SELECT * FROM memory_assets WHERE scope = ? ORDER BY path", (scope,)
-        )
+    async def memory_assets(self) -> tuple[MemoryAsset, ...]:
+        rows = await self._fetch("SELECT * FROM memory_assets ORDER BY path")
         return tuple(
             MemoryAsset(
-                scope=row["scope"],
                 path=row["path"],
                 digest=row["digest"],
                 description=row["description"],
@@ -644,36 +561,29 @@ class SqliteStorage(Storage):
             for row in rows
         )
 
-    async def remove_memory_assets(self, scope: str, paths: Sequence[str]) -> int:
+    async def remove_memory_assets(self, paths: Sequence[str]) -> int:
         if not paths:
             return 0
         placeholders = ", ".join("?" for _ in paths)
         async with self._transaction():
-            cursor = await self._conn.execute(
-                f"DELETE FROM memory_assets WHERE scope = ? AND path IN ({placeholders})",
-                (scope, *paths),
-            )
+            cursor = await self._conn.execute(f"DELETE FROM memory_assets WHERE path IN ({placeholders})", tuple(paths))
             return cursor.rowcount
 
     # -- runs ---------------------------------------------------------------
 
-    async def create_run(self, session_id: str, *, graph_file_digest: str | None = None) -> RunRecord:
+    async def create_run(self, *, graph_file_digest: str | None = None) -> RunRecord:
         run_id = uuid.uuid4().hex
         now = time.time()
         async with self._transaction():
-            await self._require_session(session_id)
+            await self._require_session()
             await self._conn.execute(
-                "INSERT INTO runs (id, session_id, status, content_time, graph_file_digest, paused, started_at, "
-                "finished_at) VALUES (?, ?, 'running', 0, ?, 0, ?, NULL)",
-                (run_id, session_id, graph_file_digest, now),
+                "INSERT INTO runs (id, status, content_time, graph_file_digest, paused, started_at, finished_at) "
+                "VALUES (?, 'running', 0, ?, 0, ?, NULL)",
+                (run_id, graph_file_digest, now),
             )
-            await self._conn.execute(
-                "UPDATE sessions SET current_run_id = ?, updated_at = ? WHERE id = ?",
-                (run_id, now, session_id),
-            )
+            await self._conn.execute("UPDATE session SET current_run_id = ?, updated_at = ?", (run_id, now))
         return RunRecord(
             id=run_id,
-            session_id=session_id,
             status="running",
             content_time=0,
             graph_file_digest=graph_file_digest,
@@ -702,10 +612,8 @@ class SqliteStorage(Storage):
         row = await self._fetch_one("SELECT * FROM runs WHERE id = ?", (run_id,))
         return _run(row) if row else None
 
-    async def runs_of_session(self, session_id: str) -> tuple[RunRecord, ...]:
-        rows = await self._fetch(
-            "SELECT * FROM runs WHERE session_id = ? ORDER BY started_at, id", (session_id,)
-        )
+    async def runs(self) -> tuple[RunRecord, ...]:
+        rows = await self._fetch("SELECT * FROM runs ORDER BY started_at, id")
         return tuple(_run(row) for row in rows)
 
     async def set_graph_file_digest(self, run_id: str, digest: str) -> RunRecord:
@@ -1004,6 +912,33 @@ class SqliteStorage(Storage):
         )
 
 
+async def read_session_summary(session_dir: Path) -> SessionSummary | None:
+    """The session record and runs of the database in `session_dir`, through a read-only connection.
+
+    For listing conversations: nothing is created or written, and a folder without a database, or
+    with one this code cannot read, has no summary.
+    """
+    path = artifacts.state_db_path(Path(session_dir))
+    if not path.is_file():
+        return None
+    try:
+        async with aiosqlite.connect(f"file:{path}?mode=ro", uri=True) as conn:
+            conn.row_factory = aiosqlite.Row
+            version = (await (await conn.execute("PRAGMA user_version")).fetchone())[0]
+            if version != SCHEMA_VERSION:
+                logger.warning("%s has schema version %s, not %s; not listed", path, version, SCHEMA_VERSION)
+                return None
+            session = await (await conn.execute("SELECT * FROM session")).fetchone()
+            if session is None:
+                return None
+            runs = await (await conn.execute("SELECT * FROM runs ORDER BY started_at, id")).fetchall()
+            return SessionSummary(session=_session(session), runs=tuple(_run(row) for row in runs))
+    except (aiosqlite.Error, ValueError) as e:
+        # ValueError covers a row the record types refuse (pydantic's ValidationError) or bad JSON.
+        logger.warning("%s could not be read: %s", path, e)
+        return None
+
+
 # -- row to record ----------------------------------------------------------
 
 
@@ -1035,7 +970,6 @@ def _stored_message(row: aiosqlite.Row) -> StoredMessage:
 def _run(row: aiosqlite.Row) -> RunRecord:
     return RunRecord(
         id=row["id"],
-        session_id=row["session_id"],
         status=row["status"],
         content_time=row["content_time"],
         graph_file_digest=row["graph_file_digest"],

@@ -1,10 +1,11 @@
 """A run: its record, its directory, and its status while the service holds it open.
 
-A run's id comes from `Storage.create_run`, its directory is `runs/<run_id>/` (trace, graph file,
-node artifacts). Its status follows what its nodes do: `running` while any node is live, `idle`
-once every node has ended, `paused` while the whole run is paused. It does not end by itself:
-an idle run takes more nodes and runs again. Only an explicit end makes it `finished` (or
-`stopped`), and closing its session makes it `closed`, to be continued when the session reopens.
+A run belongs to one conversation: its id comes from that conversation's `Storage.create_run`, its
+directory is `runs/<run_id>/` inside the conversation's folder (trace, graph file, node artifacts).
+Its status follows what its nodes do: `running` while any node is live, `idle` once every node has
+ended, `paused` while the whole run is paused. It does not end by itself: an idle run takes more
+nodes and runs again. Only an explicit end makes it `finished` (or `stopped`), and closing its
+session makes it `closed`, to be continued when the session reopens.
 """
 
 from __future__ import annotations
@@ -39,7 +40,6 @@ class Run(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run_id: str
-    session_id: str
     graph_version: int
     status: RunStatus
     # The whole run is paused; `status` is then `paused` until the run ends or closes.
@@ -48,10 +48,10 @@ class Run(BaseModel):
     finished_at: float | None = None
 
 
-async def create_run(storage: Storage, workspace: Path, session_id: str) -> RunRecord:
-    """A new run in Storage, which hands out its id, and its directory under `runs/`."""
-    record = await storage.create_run(session_id)
-    ensure_run_dir(workspace, record.id)
+async def create_run(storage: Storage) -> RunRecord:
+    """A new run of the storage's conversation, which hands out its id, and its directory under `runs/`."""
+    record = await storage.create_run()
+    ensure_run_dir(storage.session_dir, record.id)
     return record
 
 
@@ -64,10 +64,8 @@ class RunHandle:
         supervisor: Supervisor,
         storage: Storage,
         callbacks: EventEmitter,
-        workspace: Path,
     ) -> None:
         self.run_id = record.id
-        self.session_id = record.session_id
         self.started_at = record.started_at
         self.finished_at = record.finished_at
         self.status: RunStatus = record.status
@@ -76,7 +74,8 @@ class RunHandle:
         self.supervisor = supervisor
         self.storage = storage
         self.callbacks = callbacks
-        self.workspace = workspace
+        # The folder of the conversation the run belongs to.
+        self.session_dir = storage.session_dir
         # One commit at a time per run, from a patch or from the graph file.
         self.commit_lock = asyncio.Lock()
         self._status_lock = asyncio.Lock()
@@ -88,7 +87,7 @@ class RunHandle:
 
     @property
     def graph_file(self) -> Path:
-        return graph_file(self.workspace, self.run_id)
+        return graph_file(self.session_dir, self.run_id)
 
     @property
     def ended(self) -> bool:
@@ -97,7 +96,6 @@ class RunHandle:
     def snapshot(self) -> Run:
         return Run(
             run_id=self.run_id,
-            session_id=self.session_id,
             graph_version=self.graph.version,
             status=self.status,
             paused=self.paused,

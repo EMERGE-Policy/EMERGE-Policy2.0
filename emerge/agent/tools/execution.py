@@ -33,7 +33,7 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
         current = ctx.session.current_run_id
         if current is not None and any(run.run_id == current and run.status not in ENDED_STATUSES for run in runtime.runs()):
             raise ToolError(f"run {current} is still open; end_run first, or keep drawing in it")
-        run = await runtime.start_run(Graph(), ctx.session.id)
+        run = await runtime.start_run(Graph())
         ctx.session.current_run_id = run.run_id
         path = runtime.graph_file_status(run.run_id).path
         relative = ctx.relative(path)
@@ -164,8 +164,8 @@ def _node_line(node: NodeView) -> str:
         parts.append(f"outcome {node.outcome}" + (f" ({node.reason})" if node.reason else ""))
     if node.error:
         parts.append(f"error: {node.error}")
-    if node.irreversible:
-        parts.append("irreversible")
+    if node.acts_on_environment:
+        parts.append("acts on the environment")
     if node.description:
         parts.append(f"about: {node.description}")
     return "; ".join(parts)

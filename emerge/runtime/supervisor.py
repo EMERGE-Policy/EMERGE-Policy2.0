@@ -130,7 +130,7 @@ class Supervisor:
         self._bus: MessageBus | None = None
         # Every instance this run has had, by instance id; a replaced one keeps its record.
         self._records: dict[str, NodeRuntimeState] = {}
-        self._irreversible: dict[str, bool] = {}
+        self._acts_on_environment: dict[str, bool] = {}
         # Started instances whose process has not been reaped yet, by instance id.
         self._processes: dict[str, NodeProcess] = {}
         # Inputs whose source node was removed: closed, and without a source until rewired.
@@ -239,7 +239,7 @@ class Supervisor:
         async with self._ops:
             self._run_paused = paused
             self._set_graph(graph)
-            # Type and pinned code of every instance the run had, to know which ones are irreversible.
+            # Type and pinned code of every instance the run had, to know which ones act on the environment.
             kinds = {record.old_instance_id: (record.old_type, record.old_code) for record in graph.replacements}
             kinds.update({spec.instance_id: (spec.type, spec.code) for spec in graph.nodes})
             for row in stored:
@@ -254,7 +254,7 @@ class Supervisor:
                 )
                 kind = kinds.get(row.instance_id)
                 entry = self.registry.find_entry(*kind) if kind is not None else None
-                self._irreversible[row.instance_id] = entry is not None and entry.irreversible
+                self._acts_on_environment[row.instance_id] = entry is not None and entry.acts_on_environment
             # A replaced instance that was still stopping when the session closed has stopped now.
             for record in list(self._records.values()):
                 if record.state in _INTERRUPTED | {_S.STOPPING} and not graph.is_current(record.node_id, record.instance_id):
@@ -406,7 +406,7 @@ class Supervisor:
                 raise RuntimeControlError(f"node {node_id!r} is {record.state}; the message was not delivered")
             queued = self.bus.current_process(node_id) is None
             message = await self.bus.deliver_main_agent_message(
-                node_id, record.instance_id, self._irreversible[record.instance_id], text=text, data=data, refs=refs
+                node_id, record.instance_id, self._acts_on_environment[record.instance_id], text=text, data=data, refs=refs
             )
             return record, message, queued
 
@@ -724,12 +724,12 @@ class Supervisor:
 
     async def _register(self, spec: NodeSpec) -> None:
         entry = self.registry.find_entry(spec.type, spec.code)
-        self._irreversible[spec.instance_id] = entry is not None and entry.irreversible
+        self._acts_on_environment[spec.instance_id] = entry is not None and entry.acts_on_environment
         record = NodeRuntimeState(node_id=spec.id, instance_id=spec.instance_id)
         await self.bus.record_state(
             record,
             previous=None,
-            irreversible=self._irreversible[spec.instance_id],
+            acts_on_environment=self._acts_on_environment[spec.instance_id],
             current=self._graph.is_current(spec.id, spec.instance_id),
         )
         self._records[spec.instance_id] = record
@@ -743,7 +743,7 @@ class Supervisor:
         await self.bus.record_state(
             new,
             previous=old.state,
-            irreversible=self._irreversible[instance_id],
+            acts_on_environment=self._acts_on_environment[instance_id],
             current=self._graph.is_current(new.node_id, instance_id),
         )
         self._records[instance_id] = new
@@ -787,11 +787,12 @@ class Supervisor:
                 description=spec.description,
                 inputs={port.name: self._input_state(node_id, port.name) for port in entry.inputs},
                 workspace=str(self.config.workspace),
+                session_dir=str(self.storage.session_dir),
                 config=self.config.model_dump(mode="json"),
                 port_buffer=self.config.runtime.port_buffer,
                 paused=paused,
             )
-            process = NodeProcess(launch, irreversible=entry.irreversible)
+            process = NodeProcess(launch, acts_on_environment=entry.acts_on_environment)
             await process.start(self.bus.post)
         except Exception as e:
             # An unknown type or a process that could not be spawned: nothing of the node ran.
@@ -847,7 +848,7 @@ class Supervisor:
             await self._on_current_ended(process.node_id)
 
     def _final_state(self, process: NodeProcess) -> tuple[LifecycleState, str | None, str, str | None]:
-        # The same rules for every node: `irreversible` marks what acts on the environment, it does not
+        # The same rules for every node: `acts_on_environment` is only a mark, it does not
         # change how an end is recorded.
         report = process.exit_report
         if process.stop_requested:

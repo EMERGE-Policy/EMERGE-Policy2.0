@@ -62,9 +62,11 @@ class NodeContext(Protocol):
     # it on every message, reference and event the node produces.
     instance_id: str
     run_id: str
-    workspace: Path
+    # The folder of the conversation the run belongs to, sessions/<session_id>/: everything the run
+    # produces lives under it.
+    session_dir: Path
     config: WorkspaceConfig
-    # runs/<run_id>/nodes/<node_id>/<instance_id>/
+    # <session_dir>/runs/<run_id>/nodes/<node_id>/<instance_id>/
     artifacts_dir: Path
     # The one line the main agent wrote about this instance when it placed it.
     instance_description: str
@@ -155,7 +157,7 @@ class NodeContext(Protocol):
         """Messages from the main agent not taken yet, oldest first; empty when there are none.
 
         Does not wait for new ones, so a node can check at its own boundaries, e.g. in an agent
-        loop's checkpoint hook.
+        loop's boundary hook.
         """
         ...
 
@@ -177,8 +179,8 @@ class NodeContext(Protocol):
     def ref_dir(self, ref: Ref) -> Path:
         """The directory holding the content `ref` points at.
 
-        It is runs/<run_id>/nodes/<producer>/<producer_instance>/<port>/<key>/; whether it holds one
-        file or many is the node's choice. A node builds a ref for content it is about to write from
+        It is <session_dir>/runs/<run_id>/nodes/<producer>/<producer_instance>/<port>/<key>/; whether
+        it holds one file or many is the node's choice. A node builds a ref for content it is about to write from
         its own id, `instance_id`, the output port it publishes on and a key of its choosing, then
         asks for the directory instead of assembling a path itself.
         """
@@ -210,7 +212,7 @@ class Node:
     description: str = ""
     inputs: tuple[Port, ...] = ()
     outputs: tuple[Port, ...] = ()
-    irreversible: bool = False
+    acts_on_environment: bool = False
     # How this kind of node can finish, e.g. ("success", "failure", "unclear"). Every registered
     # type declares its own; the base class only leaves the slot. A node ends with `run()` returning
     # one of these, and start edges elsewhere can ask for a specific one.

@@ -23,28 +23,28 @@
 | `name` | 注册名，就是 `NodeSpec.type` 里写的值 | `""` | 定义期不查；注册时为空或全是空白则报 `RegistryError`（`emerge/graph/registry.py:173`） |
 | `description` | 说明这一类节点做什么，用于目录展示。实例自己的那句话是 `NodeSpec.description` | `""` | 不查 |
 | `inputs` / `outputs` | `Port` 元组 | `()` | 定义期转成 tuple。同侧重名允许，输入和输出同名也允许；元素是否为 `Port` 不查 |
-| `irreversible` | 节点是否作用于环境。它只是个标记：随事件发出，界面上醒目显示，不影响状态怎么记（决策［去掉 unknown 状态］） | `False` | 不查 |
+| `acts_on_environment` | 节点是否作用于环境。它只是个标记：随事件发出，界面上醒目显示，不影响状态怎么记（决策［去掉 unknown 状态］） | `False` | 不查 |
 | `outcomes` | `run()` 可能给出的结局名 | `()` | 定义期检查名字（见下表）；注册时为空则报 `RegistryError`（`emerge/graph/registry.py:177-180`） |
 | `reads` | 节点直接读取的活源，格式为 `(名字, 说明)`。不进图、不参与调度，只用于目录展示和影响分析 | `()` | 定义期转成 tuple，名字不能重复 |
 | `Params` | 实例参数的 Pydantic 模型；为 `None` 时不接受参数 | `None` | 注册时据此生成 `params_schema`，校验时用它验证 `NodeSpec.params` |
 
-### 定义期校验（`__init_subclass__`，`emerge/graph/node.py:223-233`）
+### 定义期校验（`__init_subclass__`，`emerge/graph/node.py:225-235`）
 
 | 情况 | 处理 | 位置 |
 |---|---|---|
-| `outcomes = ("done")`：少了逗号，实际是字符串 | `NodeError: outcomes must be a tuple of names, e.g. ('done',)` | `emerge/graph/node.py:253-254` |
-| `outcomes` 写成 list | 转成 tuple 后通过 | `emerge/graph/node.py:255` |
-| 结局名重复 | `NodeError: duplicate outcome name 'a'`。重名检查排在合法性检查前面，所以 `("a.b", "a.b")` 报的是重名 | `emerge/graph/node.py:256`、`265-270` |
-| 结局名含点或空白、为空串、不是字符串（如 `1`） | `NodeError: outcome ... is not a valid name` | `emerge/graph/node.py:257-259` |
-| 结局名是 `"*"` | `NodeError`：`"*"` 在图文件里表示任意结局，不能声明 | `emerge/graph/node.py:260-261` |
-| 结局里有不可哈希的值（如 list） | 重名检查用的 `set` 直接抛 `TypeError`，没有包成 `NodeError` | `emerge/graph/node.py:266-270` |
+| `outcomes = ("done")`：少了逗号，实际是字符串 | `NodeError: outcomes must be a tuple of names, e.g. ('done',)` | `emerge/graph/node.py:255-256` |
+| `outcomes` 写成 list | 转成 tuple 后通过 | `emerge/graph/node.py:257` |
+| 结局名重复 | `NodeError: duplicate outcome name 'a'`。重名检查排在合法性检查前面，所以 `("a.b", "a.b")` 报的是重名 | `emerge/graph/node.py:258`、`265-270` |
+| 结局名含点或空白、为空串、不是字符串（如 `1`） | `NodeError: outcome ... is not a valid name` | `emerge/graph/node.py:259-261` |
+| 结局名是 `"*"` | `NodeError`：`"*"` 在图文件里表示任意结局，不能声明 | `emerge/graph/node.py:262-263` |
+| 结局里有不可哈希的值（如 list） | 重名检查用的 `set` 直接抛 `TypeError`，没有包成 `NodeError` | `emerge/graph/node.py:268-272` |
 | 中文结局名（如 `"成功"`） | 通过：`NAME_PATTERN` 只排除点和空白 | `emerge/graph/ports.py:13` |
-| `reads` 名字重复 | `NodeError: duplicate read name 'f'` | `emerge/graph/node.py:233` |
-| `reads` 的元素不是二元组（如 `("abc",)`） | 解包失败，抛 `ValueError: too many values to unpack` | `emerge/graph/node.py:233` |
-| `inputs` 或 `outputs` 内部重名；输入和输出同名 | 允许，所有声明都保留 | `emerge/graph/node.py:228-230` |
-| `inputs` 里放的不是 `Port`（如字符串） | 不检查，能定义也能注册（见疑点 8） | `emerge/graph/node.py:229-230` |
-| `name` 和 `outcomes` 都为空 | 通过，留给不放进图的公共基类用 | `emerge/graph/node.py:225-227` |
-| 子类没写 `outcomes` | 继承父类的元组，并对子类重新检查一遍 | `emerge/graph/node.py:232` |
+| `reads` 名字重复 | `NodeError: duplicate read name 'f'` | `emerge/graph/node.py:235` |
+| `reads` 的元素不是二元组（如 `("abc",)`） | 解包失败，抛 `ValueError: too many values to unpack` | `emerge/graph/node.py:235` |
+| `inputs` 或 `outputs` 内部重名；输入和输出同名 | 允许，所有声明都保留 | `emerge/graph/node.py:230-232` |
+| `inputs` 里放的不是 `Port`（如字符串） | 不检查，能定义也能注册（见疑点 8） | `emerge/graph/node.py:231-232` |
+| `name` 和 `outcomes` 都为空 | 通过，留给不放进图的公共基类用 | `emerge/graph/node.py:227-229` |
+| 子类没写 `outcomes` | 继承父类的元组，并对子类重新检查一遍 | `emerge/graph/node.py:234` |
 | `name` 含点（如 `"a.b"`） | 通过：类型名不会出现在端点里，`NodeSpec.type` 也只要求非空 | `emerge/graph/graph.py:49` |
 
 ### 生命周期约定
@@ -56,7 +56,7 @@
 | `async run(ctx) -> Outcome \| None` | `raise NotImplementedError` | 返回就表示结束，在里面循环就是持续运行。没有模式字段，也没有 tick 回调 |
 | `async teardown(ctx)` | 空 | 收尾 |
 
-与执行侧的交接：`run()` 以什么方式结束、最后记成什么状态，由 `emerge/runtime/process.py:170-214` 和 supervisor 决定（详见 Runtime 部分）。
+与执行侧的交接：`run()` 以什么方式结束、最后记成什么状态，由 `emerge/runtime/process.py:172-216` 和 supervisor 决定（详见 Runtime 部分）。
 
 | `run()` 的结束方式 | 记为 |
 |---|---|
@@ -64,8 +64,8 @@
 | 返回未声明的结局、`None` 或其他值 | `failed`，没有结局，错误信息写明原因 |
 | 抛出 `StopRequested` | `stopped` |
 | 抛出其他异常 | `failed` |
-| 已经被要求停止过 | 一律记 `stopped`，返回的结局只写日志（`emerge/runtime/supervisor.py:853-866`，决策［去掉 unknown 状态］） |
-| `teardown()` 抛异常 | 只写日志，不影响结果（`emerge/runtime/process.py:193-198`） |
+| 已经被要求停止过 | 一律记 `stopped`，返回的结局只写日志（`emerge/runtime/supervisor.py:854-867`，决策［去掉 unknown 状态］） |
+| `teardown()` 抛异常 | 只写日志，不影响结果（`emerge/runtime/process.py:195-200`） |
 
 ### Outcome（`emerge/graph/node.py:30-48`）
 
@@ -82,7 +82,7 @@
 | `Outcome("*")` | 模型层能通过。但节点类不可能声明 `"*"`，执行时会按"返回了未声明的结局"处理 |
 | 传多余字段、构造后改字段 | `ValidationError` |
 
-### NodeContext（`emerge/graph/node.py:51-198`）
+### NodeContext（`emerge/graph/node.py:51-200`）
 
 它是 `runtime_checkable` 的 `Protocol`。`isinstance` 只检查成员是否都存在，缺一个就返回 `False`，不检查同步还是异步，也不检查签名（实验 `e14_protocol.py`）。
 
@@ -90,8 +90,8 @@
 |---|---|
 | `node_id` | 逻辑 id |
 | `instance_id` | 当前这一份实例（`<id>@v<版本>`）。执行侧会把它盖在节点发出的每条消息、每个引用和事件上 |
-| `run_id`、`workspace`、`config` | 运行 id、工作区路径、`WorkspaceConfig`（只在 `TYPE_CHECKING` 下导入，图层不依赖 `config` / `models`） |
-| `artifacts_dir` | `runs/<run_id>/nodes/<node_id>/<instance_id>/` |
+| `run_id`、`session_dir`、`config` | 运行 id、运行所属对话的文件夹 `<工作区>/sessions/<id>/`（运行产生的东西都在它下面）、`WorkspaceConfig`（只在 `TYPE_CHECKING` 下导入，图层不依赖 `config` / `models`） |
+| `artifacts_dir` | `<session_dir>/runs/<run_id>/nodes/<node_id>/<instance_id>/` |
 | `instance_description` | 主 Agent 放置实例时写的那句话 |
 | `outcomes` | 本类型声明的结局，只读 |
 
@@ -323,14 +323,14 @@
 
 ## registry.py
 
-本文件记录有哪些节点类型、各自从哪里来、怎样在另一个进程里重新加载。它不是纯函数，会 import 模块或 exec 文件。调用方有：`agent/tools/graph.py` 的 `register_node_code`（先在临时注册表里试注册一次，再注册到正式注册表）、`runtime/process.py:224-247`（子进程用新的注册表按 locator 重新加载）、`runtime/checkpoint.py:180-192`（恢复运行时补登实例固定的旧版本）、`validation.py`（`find_entry`）、builder 和 patch（`pin`）。
+本文件记录有哪些节点类型、各自从哪里来、怎样在另一个进程里重新加载。它不是纯函数，会 import 模块或 exec 文件。调用方有：`agent/tools/graph.py` 的 `register_node_code`（先在临时注册表里试注册一次，再注册到正式注册表）、`runtime/process.py:226-249`（子进程用新的注册表按 locator 重新加载）、`runtime/checkpoint.py:183-193`（恢复运行时补登实例固定的旧版本）、`validation.py`（`find_entry`）、builder 和 patch（`pin`）。
 
 ### 数据
 
 | 结构 | 字段 | 说明 |
 |---|---|---|
-| `NodeLocator` | `origin`（`"module"` 表示配置模块，`"file"` 表示生成代码）、`module`、`path`、`version`、`digest` | `path`、`version`、`digest` 只对 `"file"` 有值。`digest` 是注册时文件字节的 sha256；子进程加载前会先比对（`emerge/runtime/process.py:230-241`），文件内容被改过就拒绝加载 |
-| `NodeEntry` | `name`、`cls`、`locator`、`params_schema` | `description`、`inputs`、`outputs`、`reads`、`irreversible`、`outcomes`、`params_model`、`version` 都从类或 locator 读取。`params_schema` 是 `Params.model_json_schema()`，没有 `Params` 时为 `{"type": "object", "properties": {}}`。`to_dict()` 是目录视图（schema 会被深拷贝） |
+| `NodeLocator` | `origin`（`"module"` 表示配置模块，`"file"` 表示生成代码）、`module`、`path`、`version`、`digest` | `path`、`version`、`digest` 只对 `"file"` 有值。`digest` 是注册时文件字节的 sha256；子进程加载前会先比对（`emerge/runtime/process.py:232-243`），文件内容被改过就拒绝加载 |
+| `NodeEntry` | `name`、`cls`、`locator`、`params_schema` | `description`、`inputs`、`outputs`、`reads`、`acts_on_environment`、`outcomes`、`params_model`、`version` 都从类或 locator 读取。`params_schema` 是 `Params.model_json_schema()`，没有 `Params` 时为 `{"type": "object", "properties": {}}`。`to_dict()` 是目录视图（schema 会被深拷贝） |
 | `_entries` | 名字 → 当前实现 | 这就是目录 |
 | `_versions` | `(名字, 版本)` → 条目 | 只记录 file 来源的条目。实例固定在其中某个版本上，注册新版本不影响已放置的旧实例 |
 | `loading` | 正在执行的文件的 locator | 装饰器据此把来源记为 file |
@@ -591,7 +591,7 @@ patch 不接收结局，所以"新加的启动边是否已经满足"由调用方
 
 ## serialization.py
 
-存储用的完整、无损格式，覆盖 `Graph` 和 `GraphPatch`。`storage/sqlite.py:732-744` 用 `dumps_graph` / `loads_graph` 存取图，`runtime/mutations.py:180` 用 `patch_to_dict` 把 patch 写进 `graph.patched` 事件。它和主 Agent 编辑的图文件（`spec.py`）是两种格式，互不替代。
+存储用的完整、无损格式，覆盖 `Graph` 和 `GraphPatch`。`storage/sqlite.py:640-652` 用 `dumps_graph` / `loads_graph` 存取图，`runtime/mutations.py:180` 用 `patch_to_dict` 把 patch 写进 `graph.patched` 事件。它和主 Agent 编辑的图文件（`spec.py`）是两种格式，互不替代。
 
 ### 输出
 
@@ -854,8 +854,8 @@ flowchart LR
 1. **成环检测在几个环共用一个节点时只报一个环**。`emerge/graph/graph.py:265-266` 的 docstring（"Distinct loops sharing a node are reported once each"）和决策记录 HANDOFF.md:168（"共用一个节点的不同环各报一条"）都说每个环都会报出，但 `emerge/graph/graph.py:279` 每一步只走"第一个在残余里的依赖"。实验 `e3b_cycles.py`：a 等 b 或 c，b 等 a，c 等 a，结果只有 `[('a', 'b', 'a')]`；三角形加一条弦的图也只报一个环。图照样会被拒绝，只是报错信息不全，主 Agent 修好一个环之后才会看到下一个。
 2. **图文件的格式检查并不会"一次报出这一步的所有错误"**。`emerge/graph/spec.py:245-247` 的 docstring 和 HANDOFF.md:235 都说每一步会报出它发现的全部错误。实际上，第 1 步遇到第一个重复键就停止（`emerge/graph/spec.py:270-272`）；第 2 步里节点 id、`inputs`、`all_of` 三个校验器都是遇到第一个坏项就抛出（`emerge/graph/spec.py:45-69`）。实验：两处重复键只报 1 处，两个非法 id 只报 1 个，同一节点的两条非法输入只报 1 条。
 3. **`all_of` 出错时会多报一条误导性的错误**。`all_of` 为空或结局名不合法时，除了这条错误本身，还会多出 `nodes.X.start_when.any_of: Tuple should have at least 1 item after validation, not 0`，而文件里的 `any_of` 其实并不为空（`emerge/graph/spec.py:79`、`87`；实验 `e11_spec_format.py`）。主 Agent 看到的就是这段文字。
-4. **生成代码文件里不能有没写 `name` 的公共基类**。`emerge/graph/registry.py:254-256` 会注册文件中定义的每一个 `Node` 子类，所以一个没有 `name` 的公共基类会报 `RegistryError: node class Shared has no name`，整个文件都注册失败（实验 `e2_registry.py`）。`emerge/graph/node.py:225-227` 的注释说公共基类可以不写 `name`；这对配置模块成立，因为那里只注册加了装饰器的类，但对生成代码不成立。
+4. **生成代码文件里不能有没写 `name` 的公共基类**。`emerge/graph/registry.py:254-256` 会注册文件中定义的每一个 `Node` 子类，所以一个没有 `name` 的公共基类会报 `RegistryError: node class Shared has no name`，整个文件都注册失败（实验 `e2_registry.py`）。`emerge/graph/node.py:227-229` 的注释说公共基类可以不写 `name`；这对配置模块成立，因为那里只注册加了装饰器的类，但对生成代码不成立。
 5. **非空但实际什么都没改的 patch 也会生成新版本**。`emerge/graph/patch.py:156-157` 只对"没有 edit"的 patch 原样返回。重复 `connect` 一条已有订阅、写入相同的描述，都会让版本号加 1，diff 却是空的（实验：`set_description` 写相同文字，得到 v1，`bool(diff) == False`）。`emerge/runtime/supervisor.py:454` 和 `emerge/runtime/mutations.py:196` 只判断 `new is old`，因此这次提交会被当成一次真实的改图，报成 `committed=True`。这与 HANDOFF.md:172"避免给版本历史塞无意义的空版本"的本意不一致。图文件这条路径不会生成这种 patch，只有直接提交 patch 的调用方会遇到。
 6. **重复 id 时，校验用最后一个节点的类型检查所有同 id 节点**。`emerge/graph/validation.py:100` 的 `types` 字典以 id 为键，后出现的覆盖先出现的，而 `Graph.node()` 取的是第一个。实验：先放 `a: src`、再放 `a: nope`，会报出 `unknown node type 'src'`，可 `src` 是已注册的类型。这种图本来就会因为 `DUPLICATE_ID` 被拒绝，所以只是多了一条误导信息。
 7. **`loads_graph` / `loads_patch` 读到非对象的 JSON 时抛 `AttributeError`**。`emerge/graph/serialization.py:125` 直接调用 `data.get`，`loads_graph("[]")`、`loads_graph("null")` 抛的是 `AttributeError`，而不是 `GraphValidationError`。Storage 只读自己写进去的数据，所以实际风险不大。
-8. **定义期和注册时都不检查端口元素的类型和 `reads` 的形状**。`emerge/graph/node.py:229-231` 只是把它们转成 tuple，`emerge/graph/registry.py:172-204` 也不检查。实验 `e15_badports.py`：`inputs = ("img",)` 可以定义，也可以注册，要到 `NodeEntry.to_dict()`（`emerge/graph/registry.py:104`）或校验 `_port`（`emerge/graph/validation.py:222`）时才抛 `AttributeError`。`reads` 形状不对时，定义期抛的是 `ValueError`，不是 `NodeError`。主 Agent 生成的节点代码如果写错，得到的会是一个难懂的错误。
+8. **定义期和注册时都不检查端口元素的类型和 `reads` 的形状**。`emerge/graph/node.py:231-233` 只是把它们转成 tuple，`emerge/graph/registry.py:172-204` 也不检查。实验 `e15_badports.py`：`inputs = ("img",)` 可以定义，也可以注册，要到 `NodeEntry.to_dict()`（`emerge/graph/registry.py:104`）或校验 `_port`（`emerge/graph/validation.py:222`）时才抛 `AttributeError`。`reads` 形状不对时，定义期抛的是 `ValueError`，不是 `NodeError`。主 Agent 生成的节点代码如果写错，得到的会是一个难懂的错误。

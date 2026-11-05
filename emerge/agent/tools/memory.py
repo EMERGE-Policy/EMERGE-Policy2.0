@@ -1,12 +1,11 @@
-"""Writing and searching memory: global memory, seen by every session, and this session's own.
+"""Writing and searching memory: the conversation's own MEMORY.md, in its folder.
 
-No other session's memory can be read or written here.
+No other conversation's memory can be read or written here.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -15,13 +14,12 @@ from emerge.agent.tool import Tool, tool
 from emerge.agent.tools import ToolContext
 from emerge.agent.tools.files import IMAGE_SUFFIXES, resolve_path
 from emerge.exceptions import ToolError
-from emerge.storage.artifacts import GLOBAL_SCOPE
 
 
 class ImageToKeep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # An image file in the workspace, or a reference directory holding exactly one image.
+    # An image file in the conversation's folder, or a reference directory holding exactly one image.
     path: str
     # One line saying what the image shows.
     description: str
@@ -31,32 +29,27 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
     memory = ctx.memory
 
     @tool
-    async def write_memory(
-        text: str, scope: Literal["global", "session"] = "session", images: list[ImageToKeep] | None = None
-    ) -> str:
-        """Keep something in memory as one entry of a MEMORY.md, optionally with images.
+    async def write_memory(text: str, images: list[ImageToKeep] | None = None) -> str:
+        """Keep something in memory as one entry of MEMORY.md, optionally with images.
 
         Images are copied into the memory's asset folder, so later changes to the original file do
         not change what memory shows.
 
         Args:
             text: The entry: one fact, preference or lesson, written so it makes sense on its own later.
-            scope: "session" is seen only in this session; "global" in every session.
-            images: Images to keep with it: a workspace path to an image file, or a node's reference
+            images: Images to keep with it: the path of an image file, or a node's reference
                 directory (runs/<run>/nodes/<node>/<instance>/<port>/<key>/) holding one image, each
                 with a one-line description.
         """
         if not text.strip():
             raise ToolError("the entry is empty")
         kept = [MemoryImage(_image_file(ctx, image.path), image.description.strip(), image.path) for image in images or ()]
-        name = memory.scope(scope)
-        block = await memory.write(name, text, kept)
-        where = ctx.relative(memory.path(name))
-        return f"Written to {where}:\n{block}"
+        block = await memory.write(text, kept)
+        return f"Written to {ctx.relative(memory.path)}:\n{block}"
 
     @tool
     async def search_memory(query: str, limit: int = 10) -> str:
-        """Search global memory and this session's memory by keywords (words or Chinese text).
+        """Search memory by keywords (words or Chinese text).
 
         Returns matching entries, best first, with the paths of the images they keep; open an image
         with read_file when you need to see it.
@@ -70,8 +63,7 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
             return f"No memory entry matches {query!r}."
         lines = []
         for result in results:
-            scope = "global" if result.scope == GLOBAL_SCOPE else "session"
-            lines.append(f"[{scope}] {result.text}")
+            lines.append(result.text)
             lines += [f"    image {asset.path}: {asset.description}" for asset in result.images]
         return "\n".join(lines)
 
@@ -79,7 +71,7 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
 
 
 def _image_file(ctx: ToolContext, path: str) -> Path:
-    target = resolve_path(ctx.workspace, path, session_id=ctx.session.id)
+    target = resolve_path(ctx.session_dir, path)
     if target.is_dir():
         images = sorted(p for p in target.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES)
         if len(images) != 1:

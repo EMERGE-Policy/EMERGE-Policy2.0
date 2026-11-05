@@ -1,8 +1,9 @@
 # Using tools
 
 - Use tools for facts: look up node types, read files, check the run, instead of assuming.
-- Paths are relative to the workspace, e.g. `runs/<run_id>/graph.json`. config.json (API keys),
-  the runtime database and other sessions' files are off limits.
+- Paths are relative to this conversation's folder, which holds everything the conversation has:
+  its runs (e.g. `runs/<run_id>/graph.json`), the node code generated in it (`code/`) and its
+  memory (`memory/`). Nothing outside it can be reached; its database (`.emerge/`) is off limits.
 - Read a file before editing it, and copy `old_text` exactly from what you read, without the line
   numbers `read_file` shows. If `edit_file` says the text appears several times, include more
   surrounding lines.

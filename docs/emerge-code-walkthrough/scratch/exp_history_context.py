@@ -5,7 +5,7 @@ from pathlib import Path
 from fake import FakeProvider, client_for, dump_history, reply
 from emerge.agent import (AgentLoop, CompactionMiddleware, ContextBuilder, History, MiddlewareChain,
                           RequestBuilder, RunContext, Toolset)
-from emerge.agent.messages import strip_thinking
+from emerge.agent.messages import Turn, strip_thinking
 from emerge.models.types import Message, NativeItem, TextPart, ImagePart
 
 
@@ -39,16 +39,13 @@ oa = NativeItem(provider="openai", api_mode="responses", data={"type": "reasonin
 th = NativeItem(provider="anthropic", api_mode="anthropic_messages", data={"type": "redacted_thinking", "data": "zz"})
 h2.append_messages_to_current_turn(Message(role="assistant", content=[TextPart(text="a")], native_items=[oa, th]))
 h2.set_listener(Listener())
-js = h2.model_dump_json()
-back = History.model_validate_json(js)
-print("json round-trip equal:", back == h2, "| listener after load:", back._listener, "| json has listener:", "listener" in js)
 print("native_items():", [n.provider for n in h2.native_items()])
 m = h2.turns[0].messages[1]
 s = strip_thinking(m)
 print("strip_thinking keeps openai item:", [n.provider for n in s.native_items], "| same object when nothing to strip:", strip_thinking(s) is s,
       "| user message untouched:", strip_thinking(h2.turns[0].messages[0]) is h2.turns[0].messages[0])
 try:
-    History.model_validate({"turns": [], "extra": 1})
+    Turn.model_validate({"messages": [], "extra": 1})
 except Exception as e:
     print("extra field rejected:", type(e).__name__)
 

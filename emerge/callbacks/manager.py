@@ -18,7 +18,7 @@ class EventEmitter(Protocol):
     def emit_nowait(self, event: Event) -> None: ...
 
     def with_event_defaults(
-        self, *, run_id: str | None = None, node_id: str | None = None, irreversible: bool | None = None
+        self, *, run_id: str | None = None, node_id: str | None = None, acts_on_environment: bool | None = None
     ) -> "CallbackView": ...
 
 
@@ -83,9 +83,9 @@ class CallbackManager:
             loop.call_soon_threadsafe(self._flush_pending)
 
     def with_event_defaults(
-        self, *, run_id: str | None = None, node_id: str | None = None, irreversible: bool | None = None
+        self, *, run_id: str | None = None, node_id: str | None = None, acts_on_environment: bool | None = None
     ) -> "CallbackView":
-        return CallbackView(self, {"run_id": run_id, "node_id": node_id, "irreversible": irreversible})
+        return CallbackView(self, {"run_id": run_id, "node_id": node_id, "acts_on_environment": acts_on_environment})
 
     async def aclose(self) -> None:
         self._flush_pending()
@@ -117,7 +117,7 @@ class CallbackManager:
 
 
 class CallbackView:
-    """Emits through a manager, filling run_id / node_id / irreversible where the event leaves them empty."""
+    """Emits through a manager, filling run_id / node_id / acts_on_environment where the event leaves them empty."""
 
     def __init__(self, manager: CallbackManager, defaults: dict[str, str | bool | None]) -> None:
         self._manager = manager
@@ -130,9 +130,9 @@ class CallbackView:
         self._manager.emit_nowait(self._fill(event))
 
     def with_event_defaults(
-        self, *, run_id: str | None = None, node_id: str | None = None, irreversible: bool | None = None
+        self, *, run_id: str | None = None, node_id: str | None = None, acts_on_environment: bool | None = None
     ) -> "CallbackView":
-        overrides = {"run_id": run_id, "node_id": node_id, "irreversible": irreversible}
+        overrides = {"run_id": run_id, "node_id": node_id, "acts_on_environment": acts_on_environment}
         merged = self._defaults | {k: v for k, v in overrides.items() if v is not None}
         return CallbackView(self._manager, merged)
 

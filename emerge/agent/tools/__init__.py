@@ -28,7 +28,8 @@ if TYPE_CHECKING:
 class ToolContext:
     """What the tools of one session act on."""
 
-    workspace: Path
+    # The conversation's folder: the root of every path the tools take and hand out.
+    session_dir: Path
     config: WorkspaceConfig
     storage: Storage
     runtime: RuntimeService
@@ -45,9 +46,9 @@ class ToolContext:
         return run_id
 
     def relative(self, path: str | Path) -> str:
-        """`path` as the model should write it: relative to the workspace."""
+        """`path` as the model should write it: relative to the conversation's folder."""
         try:
-            return Path(path).resolve().relative_to(self.workspace.resolve()).as_posix()
+            return Path(path).resolve().relative_to(self.session_dir.resolve()).as_posix()
         except ValueError:
             return str(path)
 

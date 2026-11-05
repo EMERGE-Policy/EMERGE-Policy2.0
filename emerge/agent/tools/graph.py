@@ -101,9 +101,9 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
         states = {node.node_id: node.state for node in report.nodes}
         outcomes = {node.node_id: node.outcome for node in report.nodes if node.outcome is not None}
         lines = [f"run {run_id}: {report.run.status}", to_text(runtime.graph(run_id), states, outcomes)]
-        irreversible = [node.node_id for node in report.nodes if node.irreversible]
-        if irreversible:
-            lines.append(f"irreversible (act on the environment): {', '.join(irreversible)}")
+        acts_on_environment = [node.node_id for node in report.nodes if node.acts_on_environment]
+        if acts_on_environment:
+            lines.append(f"act on the environment: {', '.join(acts_on_environment)}")
         status = report.graph_file
         if status.has_changes:
             stale = " written from an older version; reset_graph before editing again," if status.stale else ""
@@ -118,7 +118,7 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
 
         The file holds exactly one node class, registered under `name` (its class attribute `name`
         must equal it). It is saved as code/<name>/v<N>.py with the next version number; the version
-        is chosen for you. A node acting on the environment must declare irreversible = True. To run
+        is chosen for you. A node acting on the environment must declare acts_on_environment = True. To run
         an existing node on the new code, set its "code" in graph.json to the version returned here and
         commit; instances on older versions keep theirs.
 
@@ -129,7 +129,7 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
         if not _TYPE_NAME.match(name):
             raise ToolError(f"type name {name!r} must start with a letter and hold only letters, digits and underscores")
         version = _next_version(ctx, name)
-        path = write_generated_code(ctx.workspace, name, version, source)
+        path = write_generated_code(ctx.session_dir, name, version, source)
         try:
             # A trial registration first, in a registry of its own, so a file declaring other names
             # never reaches the real catalog.
@@ -148,9 +148,9 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
             [f"in {port.name} ({port.type_tag})" for port in entry.inputs] + [f"out {port.name} ({port.type_tag})" for port in entry.outputs]
         )
         return (
-            f"registered {name} version {version} from {path.relative_to(ctx.workspace.resolve()).as_posix()}: "
+            f"registered {name} version {version} from {ctx.relative(path)}: "
             f"outcomes {', '.join(entry.outcomes)}; {ports or 'no ports'}; "
-            f"{'irreversible' if entry.irreversible else 'reversible'}. In graph.json write \"type\": \"{name}\" "
+            f"{'acts on the environment' if entry.acts_on_environment else 'does not act on the environment'}. In graph.json write \"type\": \"{name}\" "
             f"(and \"code\": \"{version}\" to move an existing node onto this version)."
         )
 
@@ -171,10 +171,10 @@ def _undescribed(result: GraphCommitResult, text: str) -> list[str]:
 
 def _next_version(ctx: ToolContext, name: str) -> str:
     """One above every version written or registered under `name`, so no version names two codes."""
-    known = (*list_generated_versions(ctx.workspace, name), *ctx.registry.versions(name))
+    known = (*list_generated_versions(ctx.session_dir, name), *ctx.registry.versions(name))
     numbers = [int(v) for v in known if v.isdigit()]
     version = str(max(numbers, default=0) + 1)
-    while code_path(ctx.workspace, name, version).exists():
+    while code_path(ctx.session_dir, name, version).exists():
         version = str(int(version) + 1)
     return version
 

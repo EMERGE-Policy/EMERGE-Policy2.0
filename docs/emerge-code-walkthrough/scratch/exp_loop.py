@@ -1,4 +1,4 @@
-"""Checkpoint, cancellation, close_turn, continue_turn, errors."""
+"""Boundary hook, cancellation, close_turn, continue_turn, errors."""
 import asyncio
 from pathlib import Path
 
@@ -59,7 +59,7 @@ def ctx():
 
 
 async def main():
-    print("=== checkpoint appends a user message before the 2nd model call; hook returns 0 / True")
+    print("=== boundary hook appends a user message before the 2nd model call; hook returns 0 / True")
     calls = {"n": 0}
     loop, p, h, ends = make([reply("", [("c1", "fast", {"x": 1})]), reply("final")])
     hook_log = []
@@ -69,18 +69,18 @@ async def main():
         if calls["n"] == 3:  # 1: before model#1, 2: before tool c1, 3: before model#2
             h.append_messages_to_current_turn(Message.user("NEW USER MESSAGE"))
         return 0 if calls["n"] == 1 else True
-    r = await loop.run_turn("hi", ctx(), checkpoint_hook=hook)
+    r = await loop.run_turn("hi", ctx(), boundary_hook=hook)
     print("hook calls:", hook_log, "result:", r.finish_reason, dump_history(h))
     print("2nd request last message:", p.requests[1].messages[-1].text)
 
-    print("=== checkpoint returns False before tool → turn dropped")
+    print("=== boundary hook returns False before tool → turn dropped")
     loop, p, h, ends = make([reply("x", [("c1", "fast", {"x": 1}), ("c2", "fast", {"x": 2})])])
     h.start_turn(Message.user("older turn")); h.append_messages_to_current_turn(Message(role="assistant", content=[]))
     n = {"n": 0}
     async def hook2(c):
         n["n"] += 1
         return False if n["n"] == 3 else None
-    r = await loop.run_turn("hi", ctx(), checkpoint_hook=hook2)
+    r = await loop.run_turn("hi", ctx(), boundary_hook=hook2)
     print("result:", r.finish_reason, "on_turn_end:", ends.results, dump_history(h))
 
     print("=== task.cancel() during model call")

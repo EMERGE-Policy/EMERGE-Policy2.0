@@ -39,7 +39,7 @@ class ArmPick(Node):
     inputs = (P("target"),)
     outputs = (P("result", "pick_result"),)
     outcomes = ("success", "failure")
-    irreversible = True
+    acts_on_environment = True
 
     class Params(BaseModel):
         arm: str
@@ -67,7 +67,7 @@ class ArmPlace(Node):
     inputs = (P("held_object", "held"), P("destination"))
     outputs = (P("result", "place_result"),)
     outcomes = ("success", "failure")
-    irreversible = True
+    acts_on_environment = True
 
     class Params(BaseModel):
         arm: str
@@ -82,7 +82,7 @@ class DualArmOpenFridge(Node):
     inputs = (P("fridge"), P("left_ready", "place_result"), P("right_ready", "place_result"))
     outputs = (P("result", "open_result"),)
     outcomes = ("success", "failure")
-    irreversible = True
+    acts_on_environment = True
 
     class Params(BaseModel):
         left_arm_role: str

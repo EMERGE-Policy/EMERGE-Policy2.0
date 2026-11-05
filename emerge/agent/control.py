@@ -74,7 +74,7 @@ class TurnControl(AgentMiddleware):
         self._interrupt = True
         if self._phase != "tool":
             # A reply being produced is abandoned now; a running tool is left to finish, and the
-            # turn's checkpoint hook ends the turn right after it.
+            # turn's boundary hook ends the turn right after it.
             task.cancel()
         await asyncio.wait({task})
         return True

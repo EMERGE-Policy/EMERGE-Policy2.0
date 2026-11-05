@@ -1,12 +1,16 @@
 """The storage interface: what is saved, and the shapes it comes back in.
 
+One storage is one conversation's database, kept in the conversation's own folder
+(`sessions/<session_id>/.emerge/state.db`): the session, its messages, its runs and their state,
+and the index of its memory. Nothing in it belongs to another conversation.
+
 Storage decides where things go and how they are read back; when a write happens belongs to the
 runtime and the main agent. Everything here is a coroutine, because the one implementation talks to
 SQLite through aiosqlite and the callers are already async.
 
 Two rules the interface is built around:
 
-- A session's conversation is append-only. A row is written when one message is complete and never
+- The conversation is append-only. A row is written when one message is complete and never
   rewritten. Compaction appends a summary and the turns it kept, and marks the rows before them; a
   turn cancelled inside the session marks its rows discarded. Neither deletes anything.
 - Memory content is a file (`MEMORY.md` plus `asset/`). The database holds a search index of it,
@@ -56,7 +60,7 @@ class SessionRecord(_Model):
 
 
 class StoredMessage(_Model):
-    """One row of a session's conversation. `seq` orders messages inside the session."""
+    """One row of the conversation. `seq` orders the messages."""
 
     seq: int = Field(ge=1)
     turn: int = Field(ge=0)
@@ -67,22 +71,19 @@ class StoredMessage(_Model):
 
 
 class PendingInput(_Model):
-    session_id: str
     seq: int = Field(ge=1)
     message: Message
     received_at: float
 
 
 class MemoryHit(_Model):
-    scope: str
     position: int = Field(ge=0)
     text: str
 
 
 class MemoryAsset(_Model):
-    """An image copied into one scope's `asset/`, registered by the workspace-relative path."""
+    """An image copied into the memory's `asset/`, registered by its path in the conversation folder."""
 
-    scope: str
     path: str
     digest: str
     description: str = ""
@@ -93,7 +94,6 @@ class MemoryAsset(_Model):
 
 class RunRecord(_Model):
     id: str
-    session_id: str
     status: RunStatus = "running"
     # The timeline number most recently handed out; see `Storage.next_content_time`.
     content_time: int = Field(default=0, ge=0)
@@ -168,37 +168,43 @@ class RunState(_Model):
     queued_messages: tuple[QueuedNodeMessage, ...] = ()
 
 
-class Storage(ABC):
-    """Sessions, conversations, memory indexes, and run state.
+class SessionSummary(_Model):
+    """A conversation as a list of conversations shows it, read without opening its storage."""
 
-    A session's runs have to be finished before the session can be deleted. Nothing else here
-    enforces order: the callers know which write belongs to which moment.
+    session: SessionRecord
+    # Oldest first.
+    runs: tuple[RunRecord, ...] = ()
+
+
+class Storage(ABC):
+    """One conversation: its session record, its messages, its memory index, and its runs.
+
+    Nothing here enforces order: the callers know which write belongs to which moment.
     """
 
-    workspace: Path
+    # The conversation's folder; the database lives under it.
+    session_dir: Path
 
-    # -- sessions -----------------------------------------------------------
+    # -- the session --------------------------------------------------------
 
     @abstractmethod
     async def create_session(
         self,
+        session_id: str,
         *,
         title: str = "",
         system: str | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> SessionRecord: ...
+    ) -> SessionRecord:
+        """Write the session record of a new storage. A storage holds one; a second is refused."""
 
     @abstractmethod
-    async def get_session(self, session_id: str) -> SessionRecord | None: ...
-
-    @abstractmethod
-    async def list_sessions(self, *, limit: int | None = None) -> tuple[SessionRecord, ...]:
-        """Most recently updated first."""
+    async def get_session(self) -> SessionRecord | None:
+        """The session record, None before `create_session`."""
 
     @abstractmethod
     async def update_session(
         self,
-        session_id: str,
         *,
         title: str | None = None,
         status: SessionStatus | None = None,
@@ -214,41 +220,31 @@ class Storage(ABC):
         """
 
     @abstractmethod
-    async def set_system_snapshot(self, session_id: str, system: str) -> SessionRecord:
-        """Replace the system text this session sends; called on compaction, not on reopen."""
-
-    @abstractmethod
-    async def delete_session(self, session_id: str) -> None:
-        """Delete the session, its conversation, queued input, memory index, and its runs.
-
-        A run's graph, node states, port messages and asks go with it; the run's directory under
-        `runs/` and its trace are left alone. Raises StorageError while any run is still open.
-        """
+    async def set_system_snapshot(self, system: str) -> SessionRecord:
+        """Replace the system text the session sends; called on compaction, not on reopen."""
 
     # -- conversation -------------------------------------------------------
 
     @abstractmethod
-    async def append_message(
-        self, session_id: str, turn: int, message: Message, *, summary: bool = False
-    ) -> StoredMessage: ...
+    async def append_message(self, turn: int, message: Message, *, summary: bool = False) -> StoredMessage: ...
 
     @abstractmethod
     async def compact_messages(
-        self, session_id: str, summary: Message, kept: Sequence[tuple[int, Message]]
+        self, summary: Message, kept: Sequence[tuple[int, Message]]
     ) -> tuple[StoredMessage, ...]:
         """Append the compacted view and retire what it replaces, in one transaction.
 
-        Every readable row of the session is marked compacted; `kept` holds the turns kept after
-        compaction as (turn, message), already stripped of thinking blocks. The summary row is
-        appended first and marked as a summary. Returns the appended rows.
+        Every readable row is marked compacted; `kept` holds the turns kept after compaction as
+        (turn, message), already stripped of thinking blocks. The summary row is appended first and
+        marked as a summary. Returns the appended rows.
         """
 
     @abstractmethod
-    async def discard_turn(self, session_id: str, turn: int) -> int:
+    async def discard_turn(self, turn: int) -> int:
         """Mark one turn's rows discarded and return how many. The rows stay in the database."""
 
     @abstractmethod
-    async def load_messages(self, session_id: str) -> tuple[StoredMessage, ...]:
+    async def load_messages(self) -> tuple[StoredMessage, ...]:
         """The conversation from the latest summary onward, in sequence order.
 
         Without a summary, the whole conversation. Rows marked compacted or discarded are not
@@ -258,45 +254,40 @@ class Storage(ABC):
     # -- queued user messages -----------------------------------------------
 
     @abstractmethod
-    async def add_pending_input(self, session_id: str, message: Message) -> PendingInput: ...
+    async def add_pending_input(self, message: Message) -> PendingInput: ...
 
     @abstractmethod
-    async def pending_inputs(self, session_id: str) -> tuple[PendingInput, ...]:
+    async def pending_inputs(self) -> tuple[PendingInput, ...]:
         """Oldest first."""
 
     @abstractmethod
-    async def remove_pending_input(self, session_id: str, seq: int) -> None:
+    async def remove_pending_input(self, seq: int) -> None:
         """Delete one queued message, by the `seq` it was given; called once it reached the agent."""
 
     # -- memory index -------------------------------------------------------
 
     @abstractmethod
-    async def replace_memory_entries(
-        self, scope: str, entries: Sequence[str], file_digest: str
-    ) -> None:
-        """Replace one scope's index with `entries`, in file order, and record the digest indexed.
+    async def replace_memory_entries(self, entries: Sequence[str], file_digest: str) -> None:
+        """Replace the index with `entries`, in file order, and record the digest indexed.
 
         One transaction: a reader sees either the old entries or the new ones.
         """
 
     @abstractmethod
-    async def search_memory(
-        self, query: str, scopes: Sequence[str], *, limit: int = 20
-    ) -> tuple[MemoryHit, ...]:
-        """Full-text hits inside the given scopes, best first.
+    async def search_memory(self, query: str, *, limit: int = 20) -> tuple[MemoryHit, ...]:
+        """Full-text hits, best first.
 
         Chinese is indexed character by character, so a query of any length finds a substring;
         Latin words are matched whole, case-insensitively.
         """
 
     @abstractmethod
-    async def memory_file_digest(self, scope: str) -> str | None:
+    async def memory_file_digest(self) -> str | None:
         """Digest of the `MEMORY.md` content the index was last built from, None if never indexed."""
 
     @abstractmethod
     async def add_memory_asset(
         self,
-        scope: str,
         path: str,
         digest: str,
         *,
@@ -305,17 +296,16 @@ class Storage(ABC):
     ) -> MemoryAsset: ...
 
     @abstractmethod
-    async def memory_assets(self, scope: str) -> tuple[MemoryAsset, ...]: ...
+    async def memory_assets(self) -> tuple[MemoryAsset, ...]: ...
 
     @abstractmethod
-    async def remove_memory_assets(self, scope: str, paths: Sequence[str]) -> int: ...
+    async def remove_memory_assets(self, paths: Sequence[str]) -> int: ...
 
     # -- runs ---------------------------------------------------------------
 
     @abstractmethod
-    async def create_run(
-        self, session_id: str, *, graph_file_digest: str | None = None
-    ) -> RunRecord: ...
+    async def create_run(self, *, graph_file_digest: str | None = None) -> RunRecord:
+        """A new run, which becomes the session's current run."""
 
     @abstractmethod
     async def set_run_status(
@@ -326,8 +316,8 @@ class Storage(ABC):
     async def get_run(self, run_id: str) -> RunRecord | None: ...
 
     @abstractmethod
-    async def runs_of_session(self, session_id: str) -> tuple[RunRecord, ...]:
-        """Oldest first."""
+    async def runs(self) -> tuple[RunRecord, ...]:
+        """Every run of the session, oldest first."""
 
     @abstractmethod
     async def set_graph_file_digest(self, run_id: str, digest: str) -> RunRecord:
@@ -448,8 +438,15 @@ class Storage(ABC):
     async def aclose(self) -> None: ...
 
 
-async def open_storage(workspace: Path | str, *, port_buffer: int = 64) -> Storage:
-    """Open or create `<workspace>/.emerge/state.db` and return the one implementation."""
+async def open_storage(session_dir: Path | str, *, port_buffer: int = 64) -> Storage:
+    """Open or create the database of the conversation in `session_dir` and return the one implementation."""
     from emerge.storage.sqlite import SqliteStorage
 
-    return await SqliteStorage.open(Path(workspace), port_buffer=port_buffer)
+    return await SqliteStorage.open(Path(session_dir), port_buffer=port_buffer)
+
+
+async def read_session(session_dir: Path | str) -> SessionSummary | None:
+    """The conversation in `session_dir`, read without opening it for writing; None if there is none."""
+    from emerge.storage.sqlite import read_session_summary
+
+    return await read_session_summary(Path(session_dir))

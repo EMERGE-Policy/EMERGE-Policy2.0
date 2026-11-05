@@ -50,13 +50,14 @@ class OpenAIResponsesProvider(ModelProvider):
     speeds = {"fast": {"service_tier": "fast"}, "ultrafast": {"service_tier": "ultrafast"}}
 
     def __init__(
-        self, client: AsyncOpenAI, model: ModelConfig, provider_options: OpenAIOptions, workspace: Path | None = None
+        self, client: AsyncOpenAI, model: ModelConfig, provider_options: OpenAIOptions, image_root: Path | None = None
     ) -> None:
         self.client = client
         self.model = model
         # Options only this provider understands, from providers.<name>.options.
         self.provider_options = provider_options
-        self.workspace = workspace
+        # Where relative image paths in messages are read from.
+        self.image_root = image_root
 
     async def _stream_once(self, request: ModelRequest) -> AsyncIterator[StreamEvent]:
         stream = await self.client.responses.create(**await self._build_request_params(request), stream=True)
@@ -159,6 +160,9 @@ class OpenAIResponsesProvider(ModelProvider):
             ]
         if request.tool_choice:
             params["tool_choice"] = request.tool_choice
+        if request.cache_key:
+            # Requests with the same key are routed to the same cache.
+            params["prompt_cache_key"] = request.cache_key
         params |= speed_params(self, request.speed or options.speed)
         return params | request.extra
 
@@ -201,7 +205,7 @@ class OpenAIResponsesProvider(ModelProvider):
         return self._image(part)
 
     def _image(self, image: ImagePart) -> dict[str, Any]:
-        return {"type": "input_image", "image_url": image_data_url(image, self.workspace), "detail": image.detail or "auto"}
+        return {"type": "input_image", "image_url": image_data_url(image, self.image_root), "detail": image.detail or "auto"}
 
     def _matches_provider_and_api_mode(self, item: NativeItem) -> bool:
         return item.provider == self.provider and item.api_mode == self.api_mode

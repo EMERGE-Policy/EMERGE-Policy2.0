@@ -143,6 +143,8 @@ class ModelRequest(_Model):
     max_output_tokens: int | None = None
     reasoning_effort: str | None = None
     speed: Speed | None = None
+    # Requests with the same key share a cached prefix; a provider uses it if it can, or ignores it.
+    cache_key: str | None = None
     # Passed through to the SDK call unchanged.
     extra: dict[str, Any] = {}
 

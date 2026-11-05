@@ -1,13 +1,14 @@
-"""Reading and editing workspace files the way a coding agent does.
+"""Reading and editing the conversation's files the way a coding agent does.
 
 The main agent draws and changes the graph by editing `runs/<run_id>/graph.json` with these tools
 and then committing it; generated node code and MEMORY.md can be edited the same way. Editing a
 file changes nothing by itself: the graph file waits for `commit_graph`, code for
 `register_node_code`, and memory is re-indexed the next time it is searched.
 
-Paths are relative to the workspace (or absolute inside it). After symlinks are followed a path
-must still be inside the workspace. `config.json` holds the API keys and can be neither read nor
-written; the database under `.emerge/` and other sessions' directories are off limits too.
+Paths are relative to the conversation's folder, `sessions/<session_id>/` (or absolute inside it).
+After symlinks are followed a path must still be inside that folder, so the workspace settings
+(`config.json` holds the API keys) and other conversations are out of reach. The database under
+`.emerge/` is off limits too.
 """
 
 from __future__ import annotations
@@ -27,30 +28,25 @@ MAX_LINE = 2000
 WRITING_TOOLS = frozenset({"edit_file", "write_file"})
 
 
-def resolve_path(workspace: Path, path: str, *, session_id: str) -> Path:
+def resolve_path(session_dir: Path, path: str) -> Path:
     """The file `path` names, refused when it leads outside what the main agent may touch."""
-    root = workspace.resolve()
+    root = session_dir.resolve()
     candidate = Path(path).expanduser()
     if not candidate.is_absolute():
         candidate = root / candidate
     resolved = candidate.resolve()
     if not resolved.is_relative_to(root):
-        raise ToolError(f"{path} is outside the workspace {root}")
-    relative = resolved.relative_to(root)
-    if relative == Path("config.json"):
-        raise ToolError("config.json holds the API keys; it can be neither read nor written")
-    if relative.parts[:1] == (".emerge",):
+        raise ToolError(f"{path} is outside this conversation's folder {root}")
+    if resolved.relative_to(root).parts[:1] == (".emerge",):
         raise ToolError(".emerge/ holds the runtime's database; it is not for editing")
-    if relative.parts[:1] == ("sessions",) and len(relative.parts) > 1 and relative.parts[1] != session_id:
-        raise ToolError("that belongs to another session")
     return resolved
 
 
-def is_graph_file(workspace: Path, path: Any) -> bool:
+def is_graph_file(session_dir: Path, path: Any) -> bool:
     """Whether `path` is a run's graph file, `runs/<run_id>/graph.json`."""
     if not isinstance(path, str):
         return False
-    root = workspace.resolve()
+    root = session_dir.resolve()
     candidate = Path(path).expanduser()
     resolved = (candidate if candidate.is_absolute() else root / candidate).resolve()
     if not resolved.is_relative_to(root):
@@ -59,28 +55,28 @@ def is_graph_file(workspace: Path, path: Any) -> bool:
     return len(parts) == 3 and parts[0] == "runs" and parts[2] == "graph.json"
 
 
-def writes_graph_file(workspace: Path, call: ToolCall) -> bool:
-    return call.name in WRITING_TOOLS and is_graph_file(workspace, call.arguments.get("path"))
+def writes_graph_file(session_dir: Path, call: ToolCall) -> bool:
+    return call.name in WRITING_TOOLS and is_graph_file(session_dir, call.arguments.get("path"))
 
 
 def make_tools(ctx: ToolContext) -> list[Tool]:
-    workspace = ctx.workspace
+    root = ctx.session_dir
 
     def resolve(path: str) -> Path:
-        return resolve_path(workspace, path, session_id=ctx.session.id)
+        return resolve_path(root, path)
 
     def shown(path: Path) -> str:
-        return path.relative_to(workspace.resolve()).as_posix()
+        return path.relative_to(root.resolve()).as_posix()
 
     @tool
     def read_file(path: str, offset: int | None = None, limit: int | None = None) -> ToolResult:
-        """Read a workspace file. Text comes back with line numbers; an image comes back as the image.
+        """Read a file. Text comes back with line numbers; an image comes back as the image.
 
         Line numbers are only for reading: they are not part of the file, so never put them into
         edit_file's old_text. Read long files in parts with offset and limit.
 
         Args:
-            path: Relative to the workspace, e.g. runs/<run_id>/graph.json.
+            path: Relative to this conversation's folder, e.g. runs/<run_id>/graph.json.
             offset: First line to show, counting from 1.
             limit: How many lines to show (2000 when left out).
         """
@@ -110,14 +106,14 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
 
     @tool
     def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
-        """Replace exact text in a workspace file.
+        """Replace exact text in a file.
 
         old_text must appear in the file exactly once, character for character (whitespace included,
         no line numbers); with replace_all every occurrence is replaced. Read the file first: after a
         commit the graph file is rewritten and what you read before may be out of date.
 
         Args:
-            path: Relative to the workspace.
+            path: Relative to this conversation's folder.
             old_text: The text to replace, copied from the file.
             new_text: What replaces it.
             replace_all: Replace every occurrence instead of requiring exactly one.
@@ -139,16 +135,16 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
                 "or set replace_all"
             )
         target.write_text(text.replace(old_text, new_text), encoding="utf-8")
-        return f"Edited {shown(target)}: replaced {found if replace_all else 1} occurrence(s). {_effect(target, workspace)}"
+        return f"Edited {shown(target)}: replaced {found if replace_all else 1} occurrence(s). {_effect(target, root)}"
 
     @tool
     def write_file(path: str, content: str) -> str:
-        """Write a whole workspace file, creating it (and its folders) or replacing what it held.
+        """Write a whole file, creating it (and its folders) or replacing what it held.
 
         Prefer edit_file for small changes to an existing file.
 
         Args:
-            path: Relative to the workspace.
+            path: Relative to this conversation's folder.
             content: The complete new content.
         """
         target = resolve(path)
@@ -158,18 +154,18 @@ def make_tools(ctx: ToolContext) -> list[Tool]:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         verb = "Replaced" if existed else "Created"
-        return f"{verb} {shown(target)} ({len(content.splitlines())} lines). {_effect(target, workspace)}"
+        return f"{verb} {shown(target)} ({len(content.splitlines())} lines). {_effect(target, root)}"
 
     return [read_file, edit_file, write_file]
 
 
-def _effect(target: Path, workspace: Path) -> str:
+def _effect(target: Path, root: Path) -> str:
     """What has to happen next for the edit to take effect."""
-    parts = target.relative_to(workspace.resolve()).parts
+    parts = target.relative_to(root.resolve()).parts
     if len(parts) == 3 and parts[0] == "runs" and parts[2] == "graph.json":
         return "The graph file is a draft: nothing changes in the run until commit_graph."
     if parts[:1] == ("code",):
         return "Code takes effect only once registered with register_node_code."
     if target.name == "MEMORY.md":
-        return "Memory searches see it right away; the system prompt picks it up after the next compaction or session."
+        return "Memory searches see it right away; the system prompt picks it up after the next compaction."
     return "Writing a file has no effect on the run by itself."

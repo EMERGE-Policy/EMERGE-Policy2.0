@@ -1,45 +1,59 @@
 """The application: everything one workspace needs, put together in order and taken apart in reverse.
 
+A workspace is its settings (`config.json`, AGENTS.md, USER.md, skills/) and one folder per
+conversation, `sessions/<session_id>/`, holding everything that conversation has. The application
+holds what the whole workspace shares and, at any time, one open conversation built on its folder.
+
 `Application.create(workspace)`:
 
 1. a workspace that does not exist yet is created from the template, and the user is told to fill
    in `config.json` before anything else happens;
 2. `load_config`;
 3. one `CallbackManager` for everything, with a handler that logs what deserves a log line;
-4. the node registry: the modules `config.nodes` lists, then the generated nodes already in
-   `code/` (every version, oldest first, so the newest is current and older ones stay loadable);
-5. the store (`<workspace>/.emerge/state.db`);
-6. the `RuntimeService`, whose feedback goes to the main agent, and the `MainAgent`; the agent's
-   model client then checks that the configured API mode answers;
-7. a session: the one asked for, else the most recent, else a new one. Opening an old one carries
-   it on: the conversation comes back from storage and runs left open carry on, without asking.
+4. the configured API mode is checked to answer;
+5. a conversation: the one asked for, else the most recent, else a new one.
 
-`aclose()` closes the session (the main agent finishes as session.py describes and open runs are
-closed, to be carried on next time), then the rest in reverse order. Quitting, `/new` and switching
-to another session all close the session the same way.
+Opening a conversation builds, on its folder:
+
+- its store (`.emerge/state.db`);
+- its node registry: the modules `config.nodes` lists, then the nodes generated in the conversation
+  (`code/`, every version, oldest first, so the newest is current and older ones stay loadable);
+- its `RuntimeService`, whose feedback goes to the main agent, and its `MainAgent`;
+- its `Session`. Opening an old one carries it on: the conversation comes back from storage and runs
+  left open carry on, without asking.
+
+Quitting, `/new` and switching to another conversation all close the open one the same way: the
+session first (the main agent finishes as session.py describes and open runs are closed, to be
+carried on next time), then the rest in reverse order.
 """
 
 from __future__ import annotations
 
-import json
 import logging
+import shutil
 import sys
+import uuid
 from pathlib import Path
 
-import emerge.config as emerge_config
-
-from emerge.agent import MainAgent, Session
+from emerge.agent import MainAgent, Session, list_sessions
 from emerge.callbacks import CallbackHandler, CallbackManager
-from emerge.config import CONFIG_FILE, WorkspaceConfig, init_workspace, load_config
+from emerge.config import WorkspaceConfig, api_key_missing, init_workspace, load_config
 from emerge.events import Event, EventType
 from emerge.exceptions import ConfigError, EmergeError, ModelAPIModeError, ModelError, RegistryError
 from emerge.graph.node import Node
 from emerge.graph.registry import NodeLocator, NodeRegistry
 from emerge.models.base import ModelProvider
-from emerge.models.client import ModelClient
-from emerge.models.retry import RetryPolicy
+from emerge.models.factory import create_client
 from emerge.runtime import RUN_IDLE, RuntimeService
-from emerge.storage import Storage, code_path, list_generated_versions, open_storage
+from emerge.storage import (
+    Storage,
+    code_path,
+    list_generated_names,
+    list_generated_versions,
+    open_storage,
+    read_session,
+    session_dir,
+)
 
 logger = logging.getLogger(__name__)
 events_logger = logging.getLogger("emerge.events")
@@ -73,24 +87,27 @@ class EventLog(CallbackHandler):
 
 
 class Application:
-    """One workspace, assembled. Create it with `Application.create()`; `aclose()` when done."""
+    """One workspace, assembled. Create it with `Application.create()`; `aclose()` when done.
+
+    `session_dir`, `storage`, `registry`, `runtime` and `agent` belong to the open conversation.
+    Switching replaces them once the next conversation is open; until then they are the closed
+    one's, so a view reading them meanwhile sees a closed conversation, never nothing. `session` is
+    None while no conversation is open.
+    """
 
     def __init__(
-        self,
-        config: WorkspaceConfig,
-        callbacks: CallbackManager,
-        registry: NodeRegistry,
-        storage: Storage,
-        runtime: RuntimeService,
-        agent: MainAgent,
+        self, config: WorkspaceConfig, callbacks: CallbackManager, *, provider: ModelProvider | None = None
     ) -> None:
         self.config = config
         self.workspace = config.workspace
         self.callbacks = callbacks
-        self.registry = registry
-        self.storage = storage
-        self.runtime = runtime
-        self.agent = agent
+        # Replaces the configured model provider in every conversation; for embedding and tests.
+        self.provider = provider
+        self.session_dir: Path | None = None
+        self.storage: Storage | None = None
+        self.registry: NodeRegistry | None = None
+        self.runtime: RuntimeService | None = None
+        self.agent: MainAgent | None = None
         self.session: Session | None = None
         self.closed = False
 
@@ -100,12 +117,15 @@ class Application:
         workspace: Path | str | None = None,
         *,
         session_id: str | None = None,
+        new_session: bool = False,
         handlers: tuple[CallbackHandler, ...] = (),
         check_model: bool = True,
         config: WorkspaceConfig | None = None,
         provider: ModelProvider | None = None,
     ) -> Application:
-        """Assemble the application and open a session; `handlers` see every event from the start.
+        """Assemble the application and open a conversation; `handlers` see every event from the start.
+
+        The conversation is `session_id`, else a new one with `new_session`, else the most recent one.
 
         `config` replaces reading the workspace's config.json (its workspace is used); `provider`
         replaces the configured model provider. Both are for embedding and tests.
@@ -126,73 +146,106 @@ class Application:
         callbacks = CallbackManager()
         for handler in (EventLog(), *handlers):
             callbacks.add_handler(handler)
-        registry = load_registry(config)
-        storage = await open_storage(config.workspace, port_buffer=config.runtime.port_buffer)
-        runtime: RuntimeService | None = None
-        agent: MainAgent | None = None
+        app = cls(config, callbacks, provider=provider)
         try:
-            runtime = await RuntimeService.open(
-                storage, config, registry, callbacks=callbacks, on_feedback=lambda item: agent and agent.on_feedback(item)
-            )
-            try:
-                agent = MainAgent(config, storage, runtime, registry, callbacks=callbacks)
-            except ConfigError as e:
-                raise StartupError(f"{e}. Set it in {config.config_path}.") from None
-            if provider is not None:
-                await agent.client.aclose()
-                retry = RetryPolicy(max_retries=config.agent.max_retries)
-                agent.client = ModelClient(provider, model=config.model.name, retry=retry, callbacks=agent.events)
             if check_model:
-                await check_model_api(agent, config)
-            app = cls(config, callbacks, registry, storage, runtime, agent)
-            await app.open_session(session_id)
-            return app
+                await check_model_api(config, provider)
+            await (app.switch_session(None) if new_session and session_id is None else app.open_session(session_id))
         except BaseException:
-            if runtime is not None:
-                await runtime.aclose()
-            await storage.aclose()
-            await callbacks.aclose()
+            await app.aclose()
             raise
+        return app
 
     async def open_session(self, session_id: str | None = None) -> Session:
-        """Open `session_id`, else the most recent session, else a new one."""
+        """Open `session_id`, else the most recent conversation, else a new one."""
         if session_id is None:
-            recent = await Session.list(self.storage, limit=1)
-            session_id = recent[0].id if recent else None
-        if session_id is None:
-            self.session = await Session.create(self.agent)
-        else:
-            if await self.storage.get_session(session_id) is None:
-                raise StartupError(f"no session {session_id!r} in {self.workspace}")
-            self.session = await Session.open(self.agent, session_id)
-        return self.session
+            recent = await list_sessions(self.workspace, limit=1)
+            if not recent:
+                return await self._open(uuid.uuid4().hex, new=True)
+            session_id = recent[0].session.id
+        await self._require_stored(session_id)
+        return await self._open(session_id, new=False)
 
     async def switch_session(self, session_id: str | None = None) -> Session:
-        """Close the current session as on quitting, then open `session_id`, or a new one when None."""
-        if self.session is not None:
-            await self.session.close()
-            self.session = None
-        if session_id is None:
-            self.session = await Session.create(self.agent)
-            return self.session
-        return await self.open_session(session_id)
+        """Close the open conversation as on quitting, then open `session_id`, or a new one when None."""
+        if session_id is not None:
+            await self._require_stored(session_id)
+        await self._close_session()
+        return await self._open(session_id or uuid.uuid4().hex, new=session_id is None)
 
     async def aclose(self) -> None:
         if self.closed:
             return
         self.closed = True
         try:
-            if self.session is not None:
-                await self.session.close()
+            await self._close_session()
         finally:
-            await self.runtime.aclose()
-            await self.agent.client.aclose()
-            await self.storage.aclose()
+            if self.provider is not None:
+                await self.provider.aclose()
             await self.callbacks.aclose()
 
+    # -- one conversation ------------------------------------------------------------
 
-def load_registry(config: WorkspaceConfig) -> NodeRegistry:
-    """The configured node modules, then the generated nodes saved under `code/`."""
+    async def _open(self, session_id: str, *, new: bool) -> Session:
+        """Build everything the conversation needs on its folder, then create or carry on its session."""
+        folder = session_dir(self.workspace, session_id)
+        config = self.config
+        storage = await open_storage(folder, port_buffer=config.runtime.port_buffer)
+        runtime: RuntimeService | None = None
+        agent: MainAgent | None = None
+        try:
+            registry = load_registry(config, folder)
+            runtime = await RuntimeService.open(
+                storage,
+                config,
+                registry,
+                callbacks=self.callbacks,
+                on_feedback=lambda item: agent and agent.on_feedback(item),
+            )
+            try:
+                agent = MainAgent(config, storage, runtime, registry, callbacks=self.callbacks, provider=self.provider)
+            except ConfigError as e:
+                raise StartupError(f"{e}. Set it in {config.config_path}.") from None
+            session = await (Session.create(agent, session_id) if new else Session.open(agent))
+        except BaseException:
+            if runtime is not None:
+                await runtime.aclose()
+            if agent is not None and self.provider is None:
+                await agent.client.aclose()
+            await storage.aclose()
+            if new:
+                # Nothing of a conversation that never started is worth keeping.
+                shutil.rmtree(folder, ignore_errors=True)
+            raise
+        self.session_dir, self.storage, self.registry = folder, storage, registry
+        self.runtime, self.agent, self.session = runtime, agent, session
+        return session
+
+    async def _close_session(self) -> None:
+        """Close the open conversation: its session, then its runtime, model client and storage."""
+        session, self.session = self.session, None
+        if session is None:
+            return
+        try:
+            await session.close()
+        finally:
+            await self.runtime.aclose()
+            if self.provider is None:
+                # A provider given to `create` serves every conversation; `aclose` closes it once.
+                await self.agent.client.aclose()
+            await self.storage.aclose()
+
+    async def _require_stored(self, session_id: str) -> None:
+        try:
+            folder = session_dir(self.workspace, session_id)
+        except ValueError as e:
+            raise StartupError(str(e)) from None
+        if await read_session(folder) is None:
+            raise StartupError(f"no session {session_id!r} in {self.workspace}")
+
+
+def load_registry(config: WorkspaceConfig, session_dir: Path) -> NodeRegistry:
+    """The configured node modules, then the nodes generated in the conversation in `session_dir`."""
     registry = NodeRegistry()
     try:
         registry.load_modules(config.nodes)
@@ -200,37 +253,30 @@ def load_registry(config: WorkspaceConfig) -> NodeRegistry:
             _register_imported(registry, name)
     except RegistryError as e:
         raise StartupError(f"{e}. Check the module paths in {config.config_path} (\"nodes\").") from None
-    code_dir = config.code_dir
-    for directory in sorted(path for path in code_dir.iterdir() if path.is_dir()) if code_dir.is_dir() else ():
-        for version in list_generated_versions(config.workspace, directory.name):
+    for name in list_generated_names(session_dir):
+        for version in list_generated_versions(session_dir, name):
             try:
-                registry.register_from_file(code_path(config.workspace, directory.name, version), version)
+                registry.register_from_file(code_path(session_dir, name, version), version)
             except (RegistryError, OSError) as e:
-                # One broken generated file must not keep the workspace from starting.
-                logger.warning("generated node %s v%s not loaded: %s", directory.name, version, e)
+                # One broken generated file must not keep the conversation from opening.
+                logger.warning("generated node %s v%s not loaded: %s", name, version, e)
     return registry
 
 
 def _require_api_key(config: WorkspaceConfig) -> None:
     """Stop before any request when the model provider's key is empty or still the template's placeholder."""
     name = config.model.provider
-    entry = config.providers.get(name)
-    if entry is None:
+    if config.providers.get(name) is None:
         raise StartupError(f"model.provider is {name!r}, but providers.{name} is missing in {config.config_path}")
-    try:
-        template = json.loads((Path(emerge_config.__file__).parent / "workspace_template" / CONFIG_FILE).read_text(encoding="utf-8"))
-        placeholder = template.get("providers", {}).get(name, {}).get("api_key")
-    except (OSError, ValueError):
-        placeholder = None
-    if not entry.api_key.strip() or entry.api_key == placeholder:
+    if api_key_missing(config):
         raise StartupError(f"no API key for {name}: put it in providers.{name}.api_key in {config.config_path}")
 
 
 def _register_imported(registry: NodeRegistry, module_name: str) -> None:
     """Register the node classes of a module imported before, whose decorators will not run again.
 
-    Importing registers a module's nodes only the first time in a process; an application
-    assembled again in the same process still has to see them.
+    Importing registers a module's nodes only the first time in a process; every registry built
+    after that in the same process (each conversation has its own) still has to see them.
     """
     module = sys.modules.get(module_name)
     for obj in list(vars(module).values()) if module is not None else ():
@@ -245,10 +291,15 @@ def _register_imported(registry: NodeRegistry, module_name: str) -> None:
             registry.register(obj, NodeLocator(origin="module", module=module_name))
 
 
-async def check_model_api(agent: MainAgent, config: WorkspaceConfig) -> None:
+async def check_model_api(config: WorkspaceConfig, provider: ModelProvider | None = None) -> None:
+    """Send the configured model a test request, through `provider` when one is given."""
     model = config.model
     try:
-        await agent.client.probe_api_compatibility()
+        client = create_client(config, provider=provider)
+    except ConfigError as e:
+        raise StartupError(f"{e}. Set it in {config.config_path}.") from None
+    try:
+        await client.probe_api_compatibility()
     except ModelAPIModeError as e:
         raise StartupError(f"{model.provider} does not support api_mode {model.api_mode!r} for {model.name}: {e}") from None
     except ModelError as e:
@@ -256,3 +307,6 @@ async def check_model_api(agent: MainAgent, config: WorkspaceConfig) -> None:
             f"the model {model.name} ({model.provider} / {model.api_mode}) did not answer a test request: {e}. "
             f"Check providers.{model.provider} (base_url, api_key) in {config.config_path}."
         ) from None
+    finally:
+        if provider is None:
+            await client.aclose()

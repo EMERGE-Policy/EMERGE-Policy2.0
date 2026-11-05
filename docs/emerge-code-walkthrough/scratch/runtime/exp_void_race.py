@@ -31,7 +31,7 @@ class FakeCallbacks:
 
 async def main() -> None:
     bus = MessageBus("run", FakeStorage(), FakeCallbacks(), port_buffer=8)
-    proc = SimpleNamespace(node_id="n", instance_id="n@v0", irreversible=False, send=lambda m: None)
+    proc = SimpleNamespace(node_id="n", instance_id="n@v0", acts_on_environment=False, send=lambda m: None)
     bus._asks = {"a1": (proc, 1), "a2": (proc, 2)}
 
     async def answer_later() -> None:

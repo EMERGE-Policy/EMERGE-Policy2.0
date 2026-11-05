@@ -81,8 +81,8 @@ class NodeEntry:
         return tuple(name for name, _ in self.reads)
 
     @property
-    def irreversible(self) -> bool:
-        return self.cls.irreversible
+    def acts_on_environment(self) -> bool:
+        return self.cls.acts_on_environment
 
     @property
     def outcomes(self) -> tuple[str, ...]:
@@ -104,7 +104,7 @@ class NodeEntry:
             "inputs": [port.model_dump() for port in self.inputs],
             "outputs": [port.model_dump() for port in self.outputs],
             "reads": [{"name": name, "description": note} for name, note in self.reads],
-            "irreversible": self.irreversible,
+            "acts_on_environment": self.acts_on_environment,
             "outcomes": list(self.outcomes),
             "params_schema": copy.deepcopy(self.params_schema),
             "locator": self.locator.to_dict(),

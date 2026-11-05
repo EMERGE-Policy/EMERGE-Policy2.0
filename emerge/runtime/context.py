@@ -14,7 +14,7 @@ import json
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from emerge.config import WorkspaceConfig
 from emerge.events import Event, EventType
@@ -29,6 +29,9 @@ if TYPE_CHECKING:
     from emerge.runtime.process import NodeLaunch
 
 Send = Callable[[dict[str, Any]], None]
+
+# What a `_wait` check finds.
+_T = TypeVar("_T")
 
 # What `iter_input_messages` waits for besides a message: the input closed and nothing is left.
 _CLOSED = object()
@@ -114,7 +117,7 @@ class _BusEmitter:
         self._send({"kind": Kind.EVENT, "event": event.to_dict()})
 
     def with_event_defaults(self, **_: Any) -> _BusEmitter:
-        # The bus fills run, node, instance and irreversible itself; there is nothing to default.
+        # The bus fills run, node, instance and acts_on_environment itself; there is nothing to default.
         return self
 
 
@@ -125,11 +128,11 @@ class RuntimeNodeContext:
         self.node_id = launch.node_id
         self.instance_id = launch.instance_id
         self.run_id = launch.run_id
-        self.workspace = Path(launch.workspace)
+        self.session_dir = Path(launch.session_dir)
         config = WorkspaceConfig.model_validate(launch.config)
-        config._workspace = self.workspace
+        config._workspace = Path(launch.workspace)
         self.config = config
-        self.artifacts_dir = ensure_node_dir(self.workspace, self.run_id, self.node_id, self.instance_id)
+        self.artifacts_dir = ensure_node_dir(self.session_dir, self.run_id, self.node_id, self.instance_id)
         self.instance_description = launch.description
         self.outcomes: tuple[str, ...] = ()
         self.emitter = _BusEmitter(send)
@@ -353,7 +356,7 @@ class RuntimeNodeContext:
         self._send({"kind": Kind.SNAPSHOT, "data": _json_ready(data, "status snapshot")})
 
     def ref_dir(self, ref: Ref) -> Path:
-        return ref_dir(self.workspace, self.run_id, ref)
+        return ref_dir(self.session_dir, self.run_id, ref)
 
     async def wait_for_run_permission(self) -> bool:
         while not self._stop_requested:
@@ -367,7 +370,7 @@ class RuntimeNodeContext:
             # Imported here: the provider SDKs are heavy and most nodes never call a model.
             from emerge.models.factory import create_client
 
-            self._model_client = create_client(self.config, callbacks=self.emitter)
+            self._model_client = create_client(self.config, callbacks=self.emitter, image_root=self.session_dir)
         return self._model_client
 
     async def aclose(self) -> None:
@@ -395,14 +398,14 @@ class RuntimeNodeContext:
                 inp.synced = True
         return inp
 
-    async def _wait[T](
+    async def _wait(
         self,
-        check: Callable[[], T | None],
+        check: Callable[[], _T | None],
         timeout: float | None,
         what: str,
         *,
         ports: Sequence[str] = (),
-    ) -> T:
+    ) -> _T:
         loop = asyncio.get_running_loop()
         deadline = None if timeout is None else loop.time() + timeout
         while True:

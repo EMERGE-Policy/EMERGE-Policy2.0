@@ -43,7 +43,7 @@ class Event:
     # Position on the run's graph-wide timeline (see graph.ports.Message), stamped by the bus on what
     # nodes and the main agent say to each other; None on process events such as model tokens.
     content_time: int | None = None
-    irreversible: bool | None = None
+    acts_on_environment: bool | None = None
     payload: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

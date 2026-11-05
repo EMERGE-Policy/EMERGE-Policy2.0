@@ -16,7 +16,7 @@
 
 ## messages.py
 
-对话历史按"轮"存放：一轮从一条输入开始，后面跟 assistant 回复、工具结果、运行信息，以及 checkpoint hook 追加的消息。`AgentLoop`、`ContextBuilder`、`Compactor` 读写它；主 Agent 的 `Session` 作为监听者把每次改动写进存储。
+对话历史按"轮"存放：一轮从一条输入开始，后面跟 assistant 回复、工具结果、运行信息，以及 boundary hook 追加的消息。`AgentLoop`、`ContextBuilder`、`Compactor` 读写它；主 Agent 的 `Session` 作为监听者把每次改动写进存储。
 
 ### 结构
 
@@ -24,8 +24,8 @@
 |---|---|---|
 | `Turn.messages` | 本轮全部消息，按发生顺序 | 默认 `[]`；`extra="forbid"` |
 | `Turn.summary` | 是否是压缩生成的摘要轮 | 默认 `False`，只有 `replace_oldest_turns_with_summary` 会置为 `True` |
-| `History.turns` | 轮列表，是公开属性 | 直接改它不会通知监听者；`session.history_from_rows` 就是这样重建历史的（`emerge/agent/session.py:208-217`） |
-| `History._listener` | 监听者 | `PrivateAttr`，不进序列化 |
+| `History.turns` | 轮列表，是公开属性 | 直接改它不会通知监听者；`session.history_from_rows` 就是这样重建历史的（`emerge/agent/session.py:210-219`） |
+| `History._listener` | 监听者 | 构造时为 `None` |
 | `len(history)` | 轮数 | |
 | `set_listener(listener \| None)` | 挂上 / 解除监听者 | |
 | `start_turn(message)` | 新开一轮，`message` 是首条 | |
@@ -39,7 +39,7 @@
 
 ### 监听者 `HistoryListener`
 
-它是 `Protocol`，监听者不需要继承它。四个方法都在修改**完成之后**同步调用，所以不能阻塞；主 Agent 的 `Session` 在这里只把写库操作排进队列（`emerge/agent/session.py:137-151`）。
+它是 `Protocol`，监听者不需要继承它。四个方法都在修改**完成之后**同步调用，所以不能阻塞；主 Agent 的 `Session` 在这里只把写库操作排进队列（`emerge/agent/session.py:139-153`）。
 
 | 方法 | 何时调用 | 参数 |
 |---|---|---|
@@ -52,27 +52,26 @@
 
 | 情况 | 处理 | 位置 |
 |---|---|---|
-| 历史为空时调用 `append_messages_to_current_turn(m)` | 先建一个空 `Turn` 再追加；监听者只收到 `messages_appended(0, …)`，收不到 `turn_started`（实测） | `emerge/agent/messages.py:64-68` |
-| 调用 `append_messages_to_current_turn()` 时不带消息 | 不通知；如果历史为空，会留下一个空轮 | `emerge/agent/messages.py:64-68` |
-| `truncate_to_turn_count(count)` 且 `count` ≥ 当前轮数 | 什么都不删，也不通知 | `emerge/agent/messages.py:79-82` |
-| `replace_oldest_turns_with_summary(count)` 且 `count` ≤ 0 或大于轮数 | 抛 `ValueError("cannot replace N of M turns")` | `emerge/agent/messages.py:99-100` |
-| 同上，`count` 等于轮数 | 允许，所有轮合成一个摘要轮。`Compactor` 不会这样调用，它至少保留最新 1 轮 | `emerge/agent/messages.py:99-102` |
-| 摘要文字带首尾空白 | `strip()` 后接在前缀后面 | `emerge/agent/messages.py:101` |
-| 对非 assistant 消息或没有原生 item 的消息调 `strip_thinking(message)` | 返回原对象 | `emerge/agent/messages.py:118-119` |
-| 原生 item 满足 `provider == "anthropic"` 且 `data["type"]` 为 `thinking` / `redacted_thinking` | 删除。其他原生 item（Anthropic 的 text、tool_use，OpenAI 带 `encrypted_content` 的 reasoning）保留（实测） | `emerge/agent/messages.py:120-124` |
-| 没有可删的 item | 返回同一个对象（用 `is` 比较也相同） | `emerge/agent/messages.py:125-126` |
-| 某一轮有消息被改 | 用 `model_copy` 替换整个 `Turn`，`summary` 标记保留；没改的轮还是原来的对象 | `emerge/agent/messages.py:106-109` |
-| `content` 里的 `ReasoningPart` | 不处理，它本来就不会发给 API | `emerge/agent/messages.py:112-127` |
-| 监听者方法抛异常 | 内存里的修改已经做完（先改后通知），异常原样抛给调用方 | `emerge/agent/messages.py:58-60, 66-68, 80-82, 89-93` |
+| 历史为空时调用 `append_messages_to_current_turn(m)` | 先建一个空 `Turn` 再追加；监听者只收到 `messages_appended(0, …)`，收不到 `turn_started`（实测） | `emerge/agent/messages.py:63-67` |
+| 调用 `append_messages_to_current_turn()` 时不带消息 | 不通知；如果历史为空，会留下一个空轮 | `emerge/agent/messages.py:63-67` |
+| `truncate_to_turn_count(count)` 且 `count` ≥ 当前轮数 | 什么都不删，也不通知 | `emerge/agent/messages.py:78-81` |
+| `replace_oldest_turns_with_summary(count)` 且 `count` ≤ 0 或大于轮数 | 抛 `ValueError("cannot replace N of M turns")` | `emerge/agent/messages.py:98-99` |
+| 同上，`count` 等于轮数 | 允许，所有轮合成一个摘要轮。`Compactor` 不会这样调用，它至少保留最新 1 轮 | `emerge/agent/messages.py:98-101` |
+| 摘要文字带首尾空白 | `strip()` 后接在前缀后面 | `emerge/agent/messages.py:100` |
+| 对非 assistant 消息或没有原生 item 的消息调 `strip_thinking(message)` | 返回原对象 | `emerge/agent/messages.py:117-118` |
+| 原生 item 满足 `provider == "anthropic"` 且 `data["type"]` 为 `thinking` / `redacted_thinking` | 删除。其他原生 item（Anthropic 的 text、tool_use，OpenAI 带 `encrypted_content` 的 reasoning）保留（实测） | `emerge/agent/messages.py:119-123` |
+| 没有可删的 item | 返回同一个对象（用 `is` 比较也相同） | `emerge/agent/messages.py:124-125` |
+| 某一轮有消息被改 | 用 `model_copy` 替换整个 `Turn`，`summary` 标记保留；没改的轮还是原来的对象 | `emerge/agent/messages.py:105-108` |
+| `content` 里的 `ReasoningPart` | 不处理，它本来就不会发给 API | `emerge/agent/messages.py:111-126` |
+| 监听者方法抛异常 | 内存里的修改已经做完（先改后通知），异常原样抛给调用方 | `emerge/agent/messages.py:56-58, 65-67, 79-81, 88-92` |
 
 ### 序列化
 
+`History` 是普通类，不是 Pydantic 模型，没有 `model_dump_json` / `model_validate_json`。`Turn` 仍是 Pydantic 模型（`extra="forbid"`，传入未知字段抛 `ValidationError`），去 thinking 时用它的 `model_copy`。
+
 | 情况 | 结果 | 位置 |
 |---|---|---|
-| `history.model_dump_json()` 后再 `History.model_validate_json(...)` | 结果与原历史一致（实测）：图片存的是路径，原生 item 原样保留，`Turn.summary` 也保留 | `emerge/agent/messages.py:23-24, 41-49` |
-| 反序列化得到的 History | 没有监听者，要重新 `set_listener` | `emerge/agent/messages.py:49` |
-| JSON 里有未知字段 | 抛 `ValidationError`（因为 `extra="forbid"`） | `emerge/agent/messages.py:23-24` |
-| 主 Agent 怎么持久化 | 不整体序列化 History。监听者逐条写库；打开会话时按行重建，`turn` 号变了就开新轮，`summary` 跟着行恢复 | `emerge/agent/session.py:137-151, 208-217` |
+| 主 Agent 怎么持久化 | 不整体序列化 History。监听者逐条写库；打开会话时按行重建，`turn` 号变了就开新轮，`summary` 跟着行恢复 | `emerge/agent/session.py:139-153, 210-219` |
 
 ## tool.py
 
@@ -83,7 +82,7 @@
 | 字段/方法 | 含义 | 约束/默认 |
 |---|---|---|
 | `ToolResult.content` | 发给模型的文字 | 默认 `""` |
-| `ToolResult.images` | 图片路径（工作区相对路径或绝对路径） | 默认 `[]` |
+| `ToolResult.images` | 图片路径（相对路径或绝对路径；主 Agent 的相对路径相对对话文件夹，由模型客户端的 `image_root` 读） | 默认 `[]` |
 | `ToolResult.is_error` | 是否错误 | 默认 `False`。只体现在 `tool.finished` 事件里，发给模型的消息里没有这个字段 |
 | `ToolResult.to_message(call_id)` | 转成 `role="tool"` 的消息 | `content` 为空时文字写 `"(no output)"`；图片作为 `ImagePart` 跟在文字后面 |
 | `Tool.name` | 工具名 | `name` 参数是 `None` 或 `""` 时用 `fn.__name__` |
@@ -161,7 +160,7 @@
 | 返回值类型不支持 | 统一返回值时抛 `TypeError`，它在 `try` 里，被转成错误结果 | `emerge/agent/tool.py:59, 182-186` |
 | 参数校验失败的调用 | 也算一次工具调用：计入 `max_tool_calls` 和 `TurnResult.tool_calls`，因为计数在调用前就加了 | `emerge/agent/loop.py:193-194` |
 
-错误结果都由 `error_result(tool_name, message, details=None)` 生成：`ToolResult(content=json.dumps({"tool", "error"[, "details"]}, ensure_ascii=False), is_error=True)`，`details` 为空时不写这个键（`emerge/agent/tool.py:189-194`）。用到它的地方有：`invoke`、循环里的未知工具（`emerge/agent/loop.py:238-239`）、主 Agent 的 `StaleCallGuard`（`emerge/agent/agent.py:121`）。
+错误结果都由 `error_result(tool_name, message, details=None)` 生成：`ToolResult(content=json.dumps({"tool", "error"[, "details"]}, ensure_ascii=False), is_error=True)`，`details` 为空时不写这个键（`emerge/agent/tool.py:189-194`）。用到它的地方有：`invoke`、循环里的未知工具（`emerge/agent/loop.py:238-239`）、主 Agent 的 `StaleCallGuard`（`emerge/agent/agent.py:123`）。
 
 ### 返回值 → `ToolResult`（均实测）
 
@@ -190,7 +189,7 @@
 
 ## middleware.py
 
-中间件包在模型调用和工具调用外面，另外还有一轮开始和结束时的通知。`AgentLoop` 持有一个 `MiddlewareChain`。主 Agent 的链从外到内依次是 `TurnControl`、`StaleCallGuard`、`PromptCacheKey`（只在 OpenAI 时有）、`CompactionMiddleware`（`emerge/agent/agent.py:318`）。
+中间件包在模型调用和工具调用外面，另外还有一轮开始和结束时的通知。`AgentLoop` 持有一个 `MiddlewareChain`。主 Agent 的链从外到内依次是 `TurnControl`、`StaleCallGuard`、`PromptCacheKey`、`CompactionMiddleware`（`emerge/agent/agent.py:346`）。
 
 ### 钩子
 
@@ -233,7 +232,7 @@
 
 ## state.py
 
-`RunLimits` 是每轮的预算，`RunContext` 是一轮的运行上下文，两者都不发给模型。主 Agent 从配置读出 `RunLimits`（`emerge/agent/agent.py:319`），并且每轮新建一个 `RunContext`（`emerge/agent/agent.py:393`）。
+`RunLimits` 是每轮的预算，`RunContext` 是一轮的运行上下文，两者都不发给模型。主 Agent 从配置读出 `RunLimits`（`emerge/agent/agent.py:327`），并且每轮新建一个 `RunContext`（`emerge/agent/agent.py:401`）。
 
 ### `RunLimits`
 
@@ -264,15 +263,15 @@
 
 | 字段/方法 | 含义 | 约束/默认 |
 |---|---|---|
-| `run_id` | 本轮事件带的 `run_id` | `create()` 没给时用 `uuid4().hex[:12]`。主 Agent 传入会话 id，它的事件包装层再换成当前运行的 id（`emerge/agent/agent.py:155, 393`） |
-| `workspace` | 工作区路径 | 必填 |
-| `intent_counter` | 意图计数 | 默认 0。主 Agent 的 checkpoint hook 在每个边界更新它（`emerge/agent/agent.py:436`），`StaleCallGuard` 读取它 |
+| `run_id` | 本轮事件带的 `run_id` | `create()` 没给时用 `uuid4().hex[:12]`。主 Agent 传入会话 id，它的事件包装层再换成当前运行的 id（`emerge/agent/agent.py:157, 401`） |
+| `workspace` | 这一轮工作的目录，循环本身不用它；主 Agent 传的是对话文件夹（`emerge/agent/agent.py:418`） | 必填 |
+| `intent_counter` | 意图计数 | 默认 0。主 Agent 的 boundary hook 在每个边界更新它（`emerge/agent/agent.py:459`），`StaleCallGuard` 读取它 |
 | `usage` | 本轮累计用量 | 默认 `Usage()`。循环在每次模型响应后累加（`emerge/agent/loop.py:171`），压缩的摘要调用也累加（`emerge/agent/context.py:190-191`） |
 | `record_usage(usage)` | `self.usage = self.usage + usage` | `Usage.__add__` 不保留 `speed`；`cached_tokens` / `reasoning_tokens` 两边都是 `None` 时结果仍是 `None`（`emerge/models/types.py:121-132`） |
 
 ## context.py
 
-这个文件负责让请求前缀保持稳定：`ContextBuilder` 组装并缓存 system，并负责追加运行信息；`RequestBuilder` 是唯一组装请求的地方；`Compactor`（见下一节）是唯一会改写前缀的操作。`AgentLoop` 每次调用模型前都用到它们，主 Agent 处理节点提问的旁路请求也用 `RequestBuilder.build()`（`emerge/agent/agent.py:487`）。
+这个文件负责让请求前缀保持稳定：`ContextBuilder` 组装并缓存 system，并负责追加运行信息；`RequestBuilder` 是唯一组装请求的地方；`Compactor`（见下一节）是唯一会改写前缀的操作。`AgentLoop` 每次调用模型前都用到它们，主 Agent 处理节点提问的旁路请求也用 `RequestBuilder.build()`（`emerge/agent/agent.py:495`）。
 
 ### `ContextBuilder`
 
@@ -280,7 +279,7 @@
 |---|---|---|
 | `instructions` | 按顺序排列的指令片段，每段是 `str` 或返回 `str` 的回调 | 拷贝成 list |
 | `runtime_info` | 运行信息回调 | 默认 `None` |
-| `system`（构造参数） | 直接作为缓存的 system 文本，不再组装 | 默认 `None`。主 Agent 传入会话记录里存的 system（`emerge/agent/agent.py:275-277`） |
+| `system`（构造参数） | 直接作为缓存的 system 文本，不再组装 | 默认 `None`。主 Agent 传入会话记录里存的 system（`emerge/agent/agent.py:283-285`） |
 | `get_system_prompt()` | 缓存为 `None` 时组装一次，之后一直返回缓存 | |
 | `rebuild_system_prompt()` | 清空"上次追加的运行信息"，然后重新组装：所有片段回调都会重新求值，比如重读 `MEMORY.md` | 只有 `Compactor.compact` 调用它（`emerge/agent/context.py:183`） |
 | `append_runtime_info(history)` | 见下面的运行信息表 | 返回这次是否追加了 |
@@ -316,7 +315,7 @@
 |---|---|---|
 | `tools` | 构造时拷贝的 `ToolSpec` 列表 | 之后不再变化（见 tool.py 的 `Toolset` 表） |
 | `build()` | 消息 = `[Message.system(system)]`（system 非空时才有）+ `history.flatten_messages()`；`tools` 每次是新列表，但里面是同一批 `ToolSpec` 对象 | `native_items` 留空，原生 item 跟着 assistant 消息送回 |
-| `rebuild(request)` | 重新 `build()` 一次，只替换 `messages` 和 `tools`，`tool_choice`、`temperature`、`extra` 等保持不变（实测） | 压缩后由 `CompactionMiddleware.before_model` 调用 |
+| `rebuild(request)` | 重新 `build()` 一次，只替换 `messages` 和 `tools`，`tool_choice`、`temperature`、`cache_key`、`extra` 等保持不变（实测） | 压缩后由 `CompactionMiddleware.before_model` 调用 |
 
 ### 前缀稳定靠什么
 
@@ -325,7 +324,7 @@
 | system | 缓存起来，只在压缩后重建 | 压缩 |
 | 工具列表 | 在 `RequestBuilder` 构造时固定，顺序就是注册顺序 | 无 |
 | 消息 | 两次压缩之间 History 只在末尾追加；会变化的内容（运行信息）作为新消息追加，不放进 system | 压缩（折叠旧轮、去 thinking）；取消回滚只删除末尾的轮 |
-| 调用方追加的消息 | checkpoint hook 用 `append_messages_to_current_turn` 追加到末尾；循环不检查它追加在什么位置 | — |
+| 调用方追加的消息 | boundary hook 用 `append_messages_to_current_turn` 追加到末尾；循环不检查它追加在什么位置 | — |
 
 ### `call_model(client, request, *, stream=True)`
 
@@ -338,7 +337,7 @@
 
 ## 压缩：`Compactor`（context.py）、`CompactionMiddleware`（middleware.py）、prompts/compact.md
 
-`Compactor` 把较早的若干轮交给模型写成摘要，再用一个摘要轮替换它们；`CompactionMiddleware` 在每次调用模型前判断要不要压缩，并维护精确的 token 计数。主 Agent 从配置读 `max_context_tokens` 和 `compact_threshold`，`keep_ratio` 用默认值 0.5（`emerge/agent/agent.py:302-309`）。
+`Compactor` 把较早的若干轮交给模型写成摘要，再用一个摘要轮替换它们；`CompactionMiddleware` 在每次调用模型前判断要不要压缩，并维护精确的 token 计数。主 Agent 从配置读 `max_context_tokens` 和 `compact_threshold`，`keep_ratio` 用默认值 0.5（`emerge/agent/agent.py:310-317`）。
 
 ### 参数
 
@@ -360,7 +359,7 @@
 | `after_model` | 记下 `_input_tokens`，返回 `None` | `emerge/agent/middleware.py:135-137` |
 | `on_turn_end` | 调 `record_usage(...)`，见下 | `emerge/agent/middleware.py:139-141` |
 
-在主 Agent 里它注册在最后（最内层），所以它的 `before_model` 最后执行，拿到的是其他中间件改过的请求；`rebuild` 会保留这些改动，比如 `PromptCacheKey` 加的 `extra`。
+在主 Agent 里它注册在最后（最内层），所以它的 `before_model` 最后执行，拿到的是其他中间件改过的请求；`rebuild` 会保留这些改动，比如 `PromptCacheKey` 设置的 `cache_key`。
 
 ### 精确 token 计数怎么来
 
@@ -407,7 +406,7 @@
 | 新的 system | 所有片段重新求值，会话中改过的 `MEMORY.md` 等这时才生效（实测：压缩后发出的是新 system） | `emerge/agent/context.py:183` |
 | 摘要调用的用量 | 计入 `RunContext.usage`（实测 150 = 主调用 100 + 摘要 50），因此也计入 `max_input_tokens` / `max_output_tokens_total`；但不计入 `_input_tokens` | `emerge/agent/context.py:190-191` |
 | 直接调 `Compactor.compact(history)`，不传 `run_context` | 摘要调用的用量不记到任何 `RunContext`（`ModelClient` 自己的 `model.usage` 事件照发） | `emerge/agent/context.py:190` |
-| 监听者收到通知的时机 | `compacted` 在 `rebuild_system_prompt()` 之前发出。主 Agent 的 `Session` 用延迟求值的回调取 system，真正写库时拿到的已经是重建后的文本 | `emerge/agent/context.py:180-183`、`emerge/agent/session.py:148-151` |
+| 监听者收到通知的时机 | `compacted` 在 `rebuild_system_prompt()` 之前发出。主 Agent 的 `Session` 用延迟求值的回调取 system，真正写库时拿到的已经是重建后的文本 | `emerge/agent/context.py:180-183`、`emerge/agent/session.py:150-153` |
 | `compact_threshold = 0` | budget 为 0，每次调模型都会尝试压缩（仍受"只有 1 轮"和守卫的限制） | `emerge/agent/context.py:135` |
 
 ### 摘要请求与文字记录
@@ -435,7 +434,7 @@
 
 ## loop.py
 
-`AgentLoop` 跑一轮：调用模型 → 依次执行工具 → 把结果交回模型，直到回复里没有工具调用、触发限额、被取消或被关闭为止。它不知道 inbox 和控制通道，调用方通过 `checkpoint_hook` 在边界上插入消息或结束本轮。主 Agent 每轮用一个新 task 调用 `run_turn` 或 `continue_turn`（`emerge/agent/agent.py:391-403`）。
+`AgentLoop` 跑一轮：调用模型 → 依次执行工具 → 把结果交回模型，直到回复里没有工具调用、触发限额、被取消或被关闭为止。它不知道 inbox 和控制通道，调用方通过 `boundary_hook` 在边界上插入消息或结束本轮。主 Agent 每轮用一个新 task 调用 `run_turn` 或 `continue_turn`，睡眠时攒下的多条消息一次传入（`emerge/agent/agent.py:411-427`）。
 
 ### 构造参数
 
@@ -461,16 +460,16 @@
 
 ### 一轮的步骤（`run_turn`）
 
-1. 如果输入是 `str`，转成 `Message.user`；如果是 `Message` 就原样使用，不检查 role（`emerge/agent/loop.py:92`）。
-2. 记下 `turn_index = 当前轮数`，然后 `start_turn` 新开一轮（`emerge/agent/loop.py:93-94`）。
-3. 发 `agent.message`，`role="user"`，只带文字（`emerge/agent/loop.py:95`）。
+1. 输入可以是 `str`、一条 `Message` 或一组 `Message`（`TurnInput`）：`str` 转成 `Message.user`，`Message` 原样使用、不检查 role，一组消息按顺序使用，空列表抛 `ValueError`（`emerge/agent/loop.py:29, 265-272`）。
+2. 记下 `turn_index = 当前轮数`，用第一条 `start_turn` 新开一轮，其余用 `append_messages_to_current_turn` 追加到同一轮；所以它们都在第一次模型调用之前进入历史（`emerge/agent/loop.py:96-100`）。
+3. 每条输入各发一次 `agent.message`，`role="user"`，只带文字（`emerge/agent/loop.py:101-102`）。
 4. 依次调用每个中间件的 `on_turn_start`（`emerge/agent/loop.py:131`）。
-5. 每次迭代开头依次检查：checkpoint hook → 是否已请求关闭 → 限额（`emerge/agent/loop.py:160-165`）。
+5. 每次迭代开头依次检查：boundary hook → 是否已请求关闭 → 限额（`emerge/agent/loop.py:169-174`）。
 6. 追加运行信息，`builder.build()`（`emerge/agent/loop.py:167-168`）。
 7. 在单独的 task 里跑模型调用的中间件链（包括压缩）和 `call_model`（`emerge/agent/loop.py:169, 202-214`）。
 8. `iterations += 1`，`ctx.record_usage`；把 assistant 消息写入历史，有文字就发 `agent.message`（`emerge/agent/loop.py:170-177`）。
 9. 回复里没有工具调用：以 `stop` 结束（`emerge/agent/loop.py:178-179`）。
-10. 按回复里的顺序逐个处理工具调用：预算检查 → checkpoint hook → 关闭检查 → 计数 → 工具中间件链加 `_tool_call` → 把结果写入历史（`emerge/agent/loop.py:182-196`）。
+10. 按回复里的顺序逐个处理工具调用：预算检查 → boundary hook → 关闭检查 → 计数 → 工具中间件链加 `_tool_call` → 把结果写入历史（`emerge/agent/loop.py:191-205`）。
 11. 有因预算耗尽而补了结果的调用：以 `max_tool_calls` 结束；否则回到第 5 步（`emerge/agent/loop.py:197-198`）。
 12. 结束时调用 `on_turn_end`（以异常结束时除外）；`finally` 里清除关闭标记（`emerge/agent/loop.py:134-151`）。
 
@@ -484,7 +483,7 @@
 | 回复因长度被截断（`ModelResponse.finish_reason="length"`），且没有工具调用 | 仍以 `stop` 结束 | `emerge/agent/loop.py:178-179` |
 | 截断导致工具参数的 JSON 不完整 | 模型层存成 `{"_raw": …}`，工具返回"参数不是合法 JSON"的错误结果，模型下一次可以重试 | `emerge/agent/tool.py:47-48` |
 | 回复既没有文字也没有工具调用 | 空的 assistant 消息照样写入历史，以 `stop` 结束；`text` 是更早的文字，没有就是 `""` | `emerge/agent/loop.py:174-179` |
-| 同一个 `AgentLoop` 同时跑两轮 | 代码没有加锁，也不检查；两轮共用 `_closing`、`_inflight` 和历史。docstring 写的是一次只跑一轮，主 Agent 靠 serve 循环保证串行（`emerge/agent/agent.py:378-389`） | `emerge/agent/loop.py:82-83` |
+| 同一个 `AgentLoop` 同时跑两轮 | 代码没有加锁，也不检查；两轮共用 `_closing`、`_inflight` 和历史。docstring 写的是一次只跑一轮，主 Agent 靠 serve 循环保证串行（`emerge/agent/agent.py:386-397`） | `emerge/agent/loop.py:82-83` |
 
 ### 流式与非流式
 
@@ -494,21 +493,21 @@
 | `False` | 走 `client.generate()`，发出的请求和事件与流式相同 |
 | 两者共同点 | 文字和思考的增量由 `ModelClient` 用它自己的 callbacks 以 `model.token` 事件发出；历史只写完整的回复，回复中途被取消时什么都不写 |
 
-### 边界上的新消息（`checkpoint_hook`）
+### 边界上的新消息（`boundary_hook`）
 
 | 边界 | 位置 | hook 返回 `False` 时 |
 |---|---|---|
-| 每次调用模型前（每次迭代开头，包括第一次） | `emerge/agent/loop.py:160` | 整轮取消并回滚 |
-| 每个工具调用前（因预算耗尽而补结果的调用除外） | `emerge/agent/loop.py:188` | 整轮取消并回滚，已执行工具的结果一起丢掉 |
+| 每次调用模型前（每次迭代开头，包括第一次） | `emerge/agent/loop.py:169` | 整轮取消并回滚 |
+| 每个工具调用前（因预算耗尽而补结果的调用除外） | `emerge/agent/loop.py:197` | 整轮取消并回滚，已执行工具的结果一起丢掉 |
 
 | 情况 | 处理 | 位置 |
 |---|---|---|
-| hook 返回 `None`、`True`、`0` 等不是 `False` 的值 | 继续。判断用的是 `is False`，实测返回 `0` 不会取消 | `emerge/agent/loop.py:229` |
-| hook 在边界上往历史末尾追加消息 | 循环不管追加在哪，下一次请求会带上（实测：追加的 user 消息成了第 2 次请求的最后一条） | `emerge/agent/loop.py:160, 168` |
-| hook 在两个工具调用之间追加消息 | 循环不阻止，消息会夹在同一回复的工具结果中间。主 Agent 的 hook 在上一条回复还有工具调用没得到结果时不追加（`emerge/agent/agent.py:429-431`），见疑点 10 | `emerge/agent/loop.py:188` |
-| hook 抛异常 | 不回滚，异常向上抛（见"一轮怎么结束"） | `emerge/agent/loop.py:228-230` |
-| 回滚的范围 | 只回滚历史；已经执行的工具在外部产生的效果不会撤销，下一轮的模型也看不到这些调用 | `emerge/agent/loop.py:136, 142` |
-| 主 Agent 怎么用（交接点） | 用户要求中断时返回 `False`；否则把 inbox 里的消息追加到当前轮，并把 `ctx.intent_counter` 更新为最新的意图数 | `emerge/agent/agent.py:425-437` |
+| hook 返回 `None`、`True`、`0` 等不是 `False` 的值 | 继续。判断用的是 `is False`，实测返回 `0` 不会取消 | `emerge/agent/loop.py:238` |
+| hook 在边界上往历史末尾追加消息 | 循环不管追加在哪，下一次请求会带上（实测：追加的 user 消息成了第 2 次请求的最后一条） | `emerge/agent/loop.py:169, 177` |
+| hook 在两个工具调用之间追加消息 | 循环不阻止，消息会夹在同一回复的工具结果中间。主 Agent 的 hook 在上一条回复还有工具调用没得到结果时不追加（`emerge/agent/agent.py:453-455`），见疑点 10 | `emerge/agent/loop.py:197` |
+| hook 抛异常 | 不回滚，异常向上抛（见"一轮怎么结束"） | `emerge/agent/loop.py:237-239` |
+| 回滚的范围 | 只回滚历史；已经执行的工具在外部产生的效果不会撤销，下一轮的模型也看不到这些调用 | `emerge/agent/loop.py:145, 151` |
+| 主 Agent 怎么用（交接点） | 用户要求中断时返回 `False`；否则把 inbox 里的消息追加到当前轮，并把 `ctx.intent_counter` 更新为最新的意图数 | `emerge/agent/agent.py:449-460` |
 
 ### 一轮怎么结束
 
@@ -517,7 +516,7 @@
 | `stop` | 回复里没有工具调用 | 保留 | 调用 | `TurnResult` |
 | 限额（4 种） | 见 state.py 的预算表 | 保留，每个 tool_call 都有结果 | 调用 | `TurnResult` |
 | `closed` | 调了 `close_turn()` | 保留已经完成的部分（见下表） | 调用 | `TurnResult` |
-| `cancelled`（hook 触发） | checkpoint hook 返回 `False` | 执行 `truncate_to_turn_count(turn_index)`，监听者收到 `turns_dropped`（本轮压缩过时可能删不掉，见疑点 1） | 调用 | `TurnResult(text="", tool_calls=[])` |
+| `cancelled`（hook 触发） | boundary hook 返回 `False` | 执行 `truncate_to_turn_count(turn_index)`，监听者收到 `turns_dropped`（本轮压缩过时可能删不掉，见疑点 1） | 调用 | `TurnResult(text="", tool_calls=[])` |
 | `cancelled`（取消或停止） | 任务被 `cancel()`，或者工具、中间件抛了 `StopRequested` | 同上 | 调用；`on_turn_end` 自己又被取消时会吞掉这个取消 | 原来的异常重新抛出（`CancelledError` / `StopRequested`） |
 | 其他异常 | `ModelError`，或者中间件、hook、运行信息回调、指令片段抛出的异常 | **不回滚**，本轮已写入的内容保留 | 不调用 | 异常抛出 |
 
@@ -542,7 +541,7 @@
 | 回复已写入，但第一个工具还没开始 | 在第一个工具前发现关闭标记，回复里的所有调用都补一条 `"not executed: session closed"`；以 `closed` 结束 | `emerge/agent/loop.py:188-192` |
 | 某个工具正在执行，后面还有调用 | 正在执行的工具做完，结果照常写入；同一回复里还没执行的调用各补一条 `"not executed: session closed"`；以 `closed` 结束，不再调模型（实测 3 个调用：c1 的结果保留，c2、c3 补了结果） | `emerge/agent/loop.py:188-192` |
 | 正在执行回复里的最后一个工具 | 工具做完，结果写入；下一次迭代开头发现关闭标记，以 `closed` 结束，不调模型（实测） | `emerge/agent/loop.py:161-162` |
-| checkpoint hook 正在执行 | hook 返回后再检查关闭标记；如果 hook 返回了 `False`，按取消处理 | `emerge/agent/loop.py:160-162` |
+| boundary hook 正在执行 | hook 返回后再检查关闭标记；如果 hook 返回了 `False`，按取消处理 | `emerge/agent/loop.py:169-171` |
 | 同时还有 `task.cancel()` | 取消优先（`current_task().cancelling() > 0`）：整轮丢弃，抛出 `CancelledError`（实测） | `emerge/agent/loop.py:209-212` |
 | 当时没有正在进行的轮 | 关闭标记一直留到下一轮结束，下一轮在第一个边界就以 `closed` 结束，一次模型都不调（实测，疑点 5） | `emerge/agent/loop.py:125, 150-151` |
 | 重复调用 | 没有额外效果 | `emerge/agent/loop.py:125-127` |
@@ -552,28 +551,28 @@
 | 情况 | 处理 | 位置 |
 |---|---|---|
 | 历史为空 | 和 `run_turn` 一样 | `emerge/agent/loop.py:110-111` |
-| 历史不为空 | 把消息追加到最后一轮末尾（监听者收到 `messages_appended`），发 `agent.message(user)`，令 `turn_index = 最后一轮的下标`，然后接着跑 | `emerge/agent/loop.py:112-116` |
+| 历史不为空 | 把输入（一条或一组，同 `run_turn`）追加到最后一轮末尾（监听者收到 `messages_appended`），每条发一次 `agent.message(user)`，令 `turn_index = 最后一轮的下标`，然后接着跑 | `emerge/agent/loop.py:112-116` |
 | 预算 | `iterations` 和 `executed` 从 0 开始计 | `emerge/agent/loop.py:156-157` |
 | 续跑被取消 | 整个最后一轮都丢掉，包括续跑之前的部分（实测） | `emerge/agent/loop.py:136, 142` |
 | 续跑被关闭 | 全部保留 | `emerge/agent/loop.py:199-200` |
-| 用在哪里（交接点） | 主 Agent 重开会话时，用它继续上次被关闭的那一轮 | `emerge/agent/agent.py:342-345, 380, 394` |
+| 用在哪里（交接点） | 主 Agent 重开会话时，用它继续上次被关闭的那一轮 | `emerge/agent/agent.py:350-353, 388, 402` |
 
 ### 事件
 
 | 事件 | 时机 | payload 字段 |
 |---|---|---|
-| `agent.message` | `run_turn` / `continue_turn` 把输入写入历史之后 | `role="user"`，`text`（只有文字，图片不在事件里） |
+| `agent.message` | `run_turn` / `continue_turn` 把输入写入历史之后，每条输入一次 | `role="user"`，`text`（只有文字，图片不在事件里） |
 | `agent.message` | 每次回复写入历史之后，且回复有文字时 | `role="assistant"`，`text` |
 | `tool.started` | 在工具中间件链的最内层，查找工具之前 | `tool`、`call_id`、`arguments` |
 | `tool.finished` | `invoke` 返回之后（工具不存在、参数错误、工具抛异常时也发） | `tool`、`call_id`、`is_error`、`content`（不含图片） |
 
 - 事件的 `run_id` 取自 `ctx.run_id`；`callbacks=None` 时不发事件（`emerge/agent/loop.py:252-254`）。
 - 不发事件的有：运行信息、hook 追加的消息、补的 `not executed` 结果、被中间件拦截的工具调用、压缩。
-- `model.started` / `model.token` / `model.finished` / `model.usage` 由 `ModelClient` 用它自己的 callbacks 发出；表示整轮开始和结束的 `agent.turn` 事件由主 Agent 发出（`emerge/agent/agent.py:402, 422`）。
+- `model.started` / `model.token` / `model.finished` / `model.usage` 由 `ModelClient` 用它自己的 callbacks 发出；表示整轮开始和结束的 `agent.turn` 事件由主 Agent 发出（`emerge/agent/agent.py:410, 430`）。
 
 ## skills.py
 
-`SkillStore` 在构造时读入工作区 `skills/` 目录下的全部 skill，之后不再访问磁盘。主 Agent 在 attach 时建一个（`emerge/agent/agent.py:274`）。
+`SkillStore` 在构造时读入工作区 `skills/` 目录下的全部 skill，之后不再访问磁盘。主 Agent 在 attach 时建一个（`emerge/agent/agent.py:282`）。
 
 ### 结构
 
@@ -633,18 +632,18 @@
 | `tool.py` | `Tool`、`ToolResult`、`Toolset`、`error_result`、`tool` |
 
 - 上面这些在 `import emerge.agent` 时立即导入。主 Agent 的名字（`MainAgent`、`Session`、`Inbox` 等）通过模块级 `__getattr__` 在第一次访问时才导入，导入后存进模块全局，之后不再经过 `__getattr__`（`emerge/agent/__init__.py:29-53`）。实测 `import emerge.agent` 之后，`emerge.runtime`、`emerge.storage`、`emerge.graph`、`emerge.agent.agent` 都没有被加载；访问不认识的名字抛 `AttributeError`。
-- 没有从包导出、要从子模块导入的名字：`SUMMARY_PREFIX`、`strip_thinking`、`NOT_EXECUTED_CLOSED`、`CheckpointHook`、`ModelHandler`、`ToolHandler`、`Instruction`、`transcript`、`COMPACT_PROMPT`。
+- 没有从包导出、要从子模块导入的名字：`SUMMARY_PREFIX`、`strip_thinking`、`NOT_EXECUTED_CLOSED`、`BoundaryHook`、`ModelHandler`、`ToolHandler`、`Instruction`、`transcript`、`COMPACT_PROMPT`。
 - 依赖方向：这七个模块只 import `emerge.models`、`emerge.callbacks`、`emerge.events`、`emerge.exceptions` 以及彼此（用 grep 核对过），符合计划的硬性要求。
 
 ## 疑点（待核实）
 
 ### 可能的 bug 和没处理的情况（1–7 都实测过）
 
-1. **本轮压缩折叠了 2 轮或更多之后再取消，回滚不起作用。** `turn_index` 是在压缩之前记下的（`emerge/agent/loop.py:93, 113`），压缩让轮数减少了"折叠的轮数 − 1"（`emerge/agent/context.py:180`）；取消时调用的 `truncate_to_turn_count(turn_index)`（`emerge/agent/loop.py:136, 142`）在 `turn_index ≥ 当前轮数` 时什么都不删，监听者也收不到 `turns_dropped`（`emerge/agent/messages.py:80-82`）。实测有两种结果：模型调用中取消，历史里留下 `turn2: U('cancel me')`；checkpoint 在工具前返回 `False`，历史里留下 `A(calls=['fast'])` 却没有对应的结果，之后每次请求都会带着这个没答复的 tool_call（`emerge/agent/loop.py:184` 的注释说每个 tool call 都需要结果）。只折叠 1 轮时下标不变，回滚正常（实测）。在主 Agent 里，这对应的情形是：某次模型调用前做了压缩，之后用户中断；如果中断时有工具在执行，`TurnControl` 不会取消任务，而是等到下一个边界由 hook 返回 `False`（`emerge/agent/control.py:75-78`、`emerge/agent/agent.py:427-428`）。
+1. **本轮压缩折叠了 2 轮或更多之后再取消，回滚不起作用。** `turn_index` 是在压缩之前记下的（`emerge/agent/loop.py:93, 113`），压缩让轮数减少了"折叠的轮数 − 1"（`emerge/agent/context.py:180`）；取消时调用的 `truncate_to_turn_count(turn_index)`（`emerge/agent/loop.py:136, 142`）在 `turn_index ≥ 当前轮数` 时什么都不删，监听者也收不到 `turns_dropped`（`emerge/agent/messages.py:80-82`）。实测有两种结果：模型调用中取消，历史里留下 `turn2: U('cancel me')`；checkpoint 在工具前返回 `False`，历史里留下 `A(calls=['fast'])` 却没有对应的结果，之后每次请求都会带着这个没答复的 tool_call（`emerge/agent/loop.py:184` 的注释说每个 tool call 都需要结果）。只折叠 1 轮时下标不变，回滚正常（实测）。在主 Agent 里，这对应的情形是：某次模型调用前做了压缩，之后用户中断；如果中断时有工具在执行，`TurnControl` 不会取消任务，而是等到下一个边界由 hook 返回 `False`（`emerge/agent/control.py:75-78`、`emerge/agent/agent.py:435-436`）。
 2. **压缩之后，这次模型调用没完成（被取消或关闭）时，精确计数记下的是一对对不上的值。** `before_model` 已经记下压缩后的消息条数（`emerge/agent/middleware.py:131`），但 `after_model` 没有执行，`_input_tokens` 还是压缩前那次响应的值；它为 0 时会退回用 `result.usage.input_tokens`，而这个值包含摘要调用（`emerge/agent/middleware.py:141`）。实测记下的是 `(5, 50)`，其中 50 是摘要调用的 input。这之后的估算会偏高或偏低，直到下一次调用成功为止。
 3. **压缩之后，同一轮里会重复追加运行信息。** `rebuild_system_prompt` 的注释说压缩去掉了旧的运行信息（`emerge/agent/context.py:50-51`），但当前轮总会被保留（`emerge/agent/context.py:163-170`），本轮刚追加的那条还在。`_last_info` 被清空后，下一次请求又追加了一条相同的。实测当前轮是 `U('q') U('RUN INFO v1') A(calls) T U('RUN INFO v1') A('done')`。前缀没有被破坏，只是多了一条消息。
-4. **在两个工具调用之间发生的非取消类异常，会在历史里留下没有结果的 tool_call。** `_drive` 只处理 `_Cancelled`、`CancelledError` 和 `StopRequested`（`emerge/agent/loop.py:134-148`）。如果中间件的 `wrap_tool_call` 或 checkpoint hook 在同一回复的两个调用之间抛异常，实测历史为 `A(calls=[fast, fast, fast]) T[c1]`。主 Agent 把这样的轮记为 `error`，会话回到 idle（`emerge/agent/agent.py:407-419`），之后的请求都会带着这两个没答复的调用。主 Agent 里有一个能触发的地方：意图变化之后，`StaleCallGuard.wrap_tool_call` 会检查 `write_file` / `edit_file` 的 `path`，而 `is_graph_file` 遇到 `~不存在的用户/...` 或含 NUL 的路径会抛 `RuntimeError` / `ValueError`（实测，`emerge/agent/agent.py:120`、`emerge/agent/tools/files.py:54-55`）。`ModelError` 不会造成这种不配对，因为它在调模型时抛出，那时所有工具结果都已经写入了。
-5. **没有轮在进行时调用 `close_turn()`，会影响下一轮。** `_closing` 只在 `_drive` 的 `finally` 里清除（`emerge/agent/loop.py:125, 150-151`）。实测下一轮一次模型都没调就以 `closed` 结束。主 Agent 只在本轮 task 还没结束时才调用它（`emerge/agent/agent.py:356-357`），所以目前不会触发。
+4. **在两个工具调用之间发生的非取消类异常，会在历史里留下没有结果的 tool_call。** `_drive` 只处理 `_Cancelled`、`CancelledError` 和 `StopRequested`（`emerge/agent/loop.py:134-148`）。如果中间件的 `wrap_tool_call` 或 boundary hook 在同一回复的两个调用之间抛异常，实测历史为 `A(calls=[fast, fast, fast]) T[c1]`。主 Agent 把这样的轮记为 `error`，会话回到 idle（`emerge/agent/agent.py:415-427`），之后的请求都会带着这两个没答复的调用。主 Agent 里有一个能触发的地方：意图变化之后，`StaleCallGuard.wrap_tool_call` 会检查 `write_file` / `edit_file` 的 `path`，而 `is_graph_file` 遇到 `~不存在的用户/...` 或含 NUL 的路径会抛 `RuntimeError` / `ValueError`（实测，`emerge/agent/agent.py:122`、`emerge/agent/tools/files.py:50-51`）。`ModelError` 不会造成这种不配对，因为它在调模型时抛出，那时所有工具结果都已经写入了。
+5. **没有轮在进行时调用 `close_turn()`，会影响下一轮。** `_closing` 只在 `_drive` 的 `finally` 里清除（`emerge/agent/loop.py:125, 150-151`）。实测下一轮一次模型都没调就以 `closed` 结束。主 Agent 只在本轮 task 还没结束时才调用它（`emerge/agent/agent.py:364-365`），所以目前不会触发。
 6. **`on_turn_start` 中被取消或抛异常时不回滚。** `notify_turn_start` 在内层 `try` 外面（`emerge/agent/loop.py:131`）。实测用户消息留在历史里，`on_turn_end` 也不调用。现有的中间件都没有覆盖 `on_turn_start`，所以目前不会触发。
 7. **仅位置参数，以及以下划线开头的参数，在定义工具时不报错，但这个工具永远调用失败。** `_args_model` 不检查参数的种类和名字（`emerge/agent/tool.py:118-128`）；对仅位置参数，`fn(**kwargs)` 会抛 `TypeError`（`emerge/agent/tool.py:56`）；`_x` 被 Pydantic 当成私有属性，schema 里没有它。
 8. **工具返回的图片路径不存在时，会让历史"中毒"（只实测了读图这一步会报错）。** `ImagePart` 的路径在工具这一层不检查（`emerge/agent/tool.py:173-174`）。下一次组装请求时，provider 读图抛 `ModelError`（`emerge/models/base.py:185-188`）；`retry_stream` 对 `ModelError` 不重试，这一轮失败。这条工具结果已经在历史里了，按代码推断，之后每次请求都会再失败一次，直到它被压缩折叠掉。
@@ -652,6 +651,6 @@
 ### 与计划、决策记录不一致的地方
 
 9. skill 正文的注入方式：计划（`phase-03-agent-core.md:54`）和决策记录［阶段 3 补充］（HANDOFF.md:160）都说通过 `context.py` 的运行信息回调追加；代码里是 `use_skill` 工具返回正文（`emerge/agent/tools/catalog.py:48-67`），`skills.py` 只提供 `list` 和 `get`。阶段 8 的记录说明了这一改动（HANDOFF.md:821）。
-10. 计划写 checkpoint hook "在每次调用模型前和每个工具执行前调用，用来在末尾追加新消息"（`phase-03-agent-core.md:98`）。但如果在同一回复的工具结果之间插入消息，tool_call 和结果就不再相邻了（Anthropic 要求 tool_result 排在 user 消息的最前面，见 `emerge/models/providers/anthropic/messages.py:180-181` 的注释）。循环不检查这一点（`emerge/agent/loop.py:188`），主 Agent 的 hook 自己避开了（`emerge/agent/agent.py:429-431`）。
+10. 计划写 checkpoint hook（代码里现名 boundary hook）"在每次调用模型前和每个工具执行前调用，用来在末尾追加新消息"（`phase-03-agent-core.md:98`）。但如果在同一回复的工具结果之间插入消息，tool_call 和结果就不再相邻了（Anthropic 要求 tool_result 排在 user 消息的最前面，见 `emerge/models/providers/anthropic/messages.py:185-186` 的注释）。循环不检查这一点（`emerge/agent/loop.py:197`），主 Agent 的 hook 自己避开了（`emerge/agent/agent.py:453-455`）。
 11. 精确计数的来源：计划写的是在 `on_turn_end` 里用 `TurnResult.usage` 更新（`phase-03-agent-core.md:74`）；代码用的是最后一次响应的 `input_tokens`，`TurnResult.usage` 只在它为 0 时作为后备（`emerge/agent/middleware.py:136, 141`）。决策记录（HANDOFF.md:153）说明了原因。
 12. 决策记录里的方法名和代码对不上：HANDOFF.md:148 写的是 `append` / `truncate` / `replace_prefix`，HANDOFF.md:155 写的是 `regenerate()`；代码里分别是 `append_messages_to_current_turn` / `truncate_to_turn_count` / `replace_oldest_turns_with_summary`（`emerge/agent/messages.py:62, 77, 97`）和 `rebuild_system_prompt()`（`emerge/agent/context.py:49`）。

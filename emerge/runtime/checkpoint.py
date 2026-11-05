@@ -40,7 +40,7 @@ class RerunEntry(BaseModel):
 
 
 class UnavailableRef(BaseModel):
-    """A reference in a kept port message whose files are no longer in the workspace."""
+    """A reference in a kept port message whose files are no longer in the conversation's folder."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -127,7 +127,7 @@ async def resume(
     state = await storage.load_run_state(record.id)
     assert state is not None
     graph = state.graph if state.graph is not None else Graph()
-    load_pinned_code(registry, handle.workspace, graph)
+    load_pinned_code(registry, handle.session_dir, graph)
     # Their instances are gone; a new instance that needs the answer asks again.
     voided = tuple([await storage.void_ask(ask.id) for ask in state.pending_asks])
     execution = await handle.supervisor.continue_run(
@@ -172,13 +172,14 @@ async def resume(
         queued_messages=len(state.queued_messages),
         draft_kept=not written,
         draft_stale=draft_stale,
-        unavailable_refs=_unavailable_refs(handle.workspace, record.id, state.port_messages),
+        unavailable_refs=_unavailable_refs(handle.session_dir, record.id, state.port_messages),
     )
     return handle, report
 
 
-def load_pinned_code(registry: NodeRegistry, workspace: Path, graph: Graph) -> None:
-    """Register the generated code versions the graph's nodes are pinned to, from `code/<name>/`.
+def load_pinned_code(registry: NodeRegistry, session_dir: Path, graph: Graph) -> None:
+    """Register the generated code versions the graph's nodes are pinned to, from the conversation's
+    `code/<name>/`.
 
     The catalog keeps showing what it showed before: an older version loaded here for a pinned
     instance does not become the current implementation of its name.
@@ -187,17 +188,17 @@ def load_pinned_code(registry: NodeRegistry, workspace: Path, graph: Graph) -> N
         if spec.code is None or registry.find_entry(spec.type, spec.code) is not None:
             continue
         current = registry.find_entry(spec.type)
-        registry.register_from_file(code_path(workspace, spec.type, spec.code), spec.code)
+        registry.register_from_file(code_path(session_dir, spec.type, spec.code), spec.code)
         if current is not None and current.locator.origin == "file" and current.locator.path and current.locator.version:
             registry.register_from_file(current.locator.path, current.locator.version)
 
 
-def _unavailable_refs(workspace: Path, run_id: str, records: Iterable[PortRecord]) -> tuple[UnavailableRef, ...]:
+def _unavailable_refs(session_dir: Path, run_id: str, records: Iterable[PortRecord]) -> tuple[UnavailableRef, ...]:
     # Stated as they are: a reference whose files are gone is reported, never pointed elsewhere.
     missing: list[UnavailableRef] = []
     for record in records:
         for ref in record.message.refs:
-            path = ref_dir(workspace, run_id, ref)
+            path = ref_dir(session_dir, run_id, ref)
             if not path.exists():
                 missing.append(
                     UnavailableRef(

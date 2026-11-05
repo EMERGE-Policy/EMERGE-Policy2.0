@@ -7,7 +7,7 @@ name = "emerge"
 version = "0.1.0"
 description = "EMERGE-Policy 2.0: a main agent that builds and modifies graphs executed by a background runtime"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.7,<3",
     "openai>=1.35,<2",
@@ -15,13 +15,52 @@ dependencies = [
     "prompt_toolkit>=3.0,<4",
     "rich>=13.0,<14",
     "aiosqlite>=0.20,<1",
+    "numpy>=1.26",
+    "pillow>=10",
+]
+
+[project.optional-dependencies]
+# The RoboDojo simulator (robot/robodojo), in the same environment as emerge: the versions of RoboDojo's
+# scripts/install.sh. Isaac Lab and cuRobo come from RoboDojo's submodules (see [tool.uv.sources]).
+# Install with uv, which reads [tool.uv] below: uv pip install -e ".[robodojo]" (see docs/robot-interface.md, 7).
+robodojo = [
+    "torch==2.7.0",
+    "torchvision==0.22.0",
+    "torchaudio==2.7.0",
+    "isaacsim[all,extscache]==5.1.0",
+    "isaaclab",
+    "isaaclab-assets",
+    "isaaclab-contrib",
+    "isaaclab-tasks",
+    "isaaclab-rl",
+    "isaaclab-mimic",
+    "nvidia-curobo[cu12]",
+    "numpy==1.26.0",
+    "packaging==23.0",
+    "filelock==3.13.1",
+    "websockets==12.0",
+    "click==8.1.7",
+    "psutil==5.9.8",
+    "wheel==0.45.1",
+    "scipy==1.15.3",
+    "warp-lang==1.11.0",
+    "onnx>=1.18,<1.22",
+    "ipython<9",
+    "virtualenv==20.30.0",
+    "huggingface_hub",
+    "transforms3d",
+    "open3d",
+    "msgpack-numpy",
+    "opencv-python-headless==4.11.0.86",
+    "matplotlib",
+    "scikit-learn",
 ]
 
 [project.scripts]
-emerge = "emerge.cli:main"
+emerge = "tui.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["emerge"]
+packages = ["emerge", "robot", "tui"]
 
 [tool.hatch.build.targets.wheel.shared-data]
 
@@ -30,4 +69,33 @@ packages = ["emerge"]
 "emerge/agent/prompts" = "emerge/agent/prompts"
 
 [tool.hatch.build.targets.sdist]
-include = ["emerge", "README.md", "pyproject.toml"]
+include = ["emerge", "robot", "tui", "README.md", "pyproject.toml"]
+
+[tool.uv]
+# Where RoboDojo's pins and its parts disagree, the environment runs with:
+#   starlette 0.45.3: RoboDojo's pin, put back after Isaac Lab (which asks for 0.49.1), as its install.sh does;
+#   typing_extensions >= 4.14: anthropic (emerge) needs it; isaacsim-kernel pins 4.12.2. typing_extensions
+#   only ever adds, and Isaac Sim runs with 4.16.
+override-dependencies = ["starlette==0.45.3", "typing_extensions>=4.14"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+isaaclab = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab", editable = true }
+isaaclab-assets = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_assets", editable = true }
+isaaclab-contrib = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_contrib", editable = true }
+isaaclab-tasks = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_tasks", editable = true }
+isaaclab-rl = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_rl", editable = true }
+isaaclab-mimic = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_mimic", editable = true }
+nvidia-curobo = { path = "third_party/RoboDojo/third_party/curobo", editable = true }
+
+[[tool.uv.index]]
+# Isaac Sim's wheels (the isaacsim-* entries on PyPI are placeholders).
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

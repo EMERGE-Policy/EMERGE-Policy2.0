@@ -1,10 +1,9 @@
-"""The one entry point: `emerge` / `python -m emerge`.
+"""Headless mode: `python -m emerge`, and what the `emerge` command runs when stdin is not a terminal.
 
-A terminal on stdin gets the full-screen TUI; anything else (a pipe, a script) gets headless mode:
-each line on stdin is a user message, and stdout carries JSON Lines, one object per line with a
-`type`: the main agent's replies and the events worth acting on. When stdin ends, the turn in
-progress (and any message still queued) is finished, then the session is closed the normal way, so
-open runs can be carried on later.
+Each line on stdin is a user message, and stdout carries JSON Lines, one object per line with a `type`:
+the main agent's replies and the events worth acting on. When stdin ends, the turn in progress (and any
+message still queued) is finished, then the session is closed the normal way, so open runs can be
+carried on later. The full-screen interface is the `tui` package, next to this one.
 """
 
 from __future__ import annotations
@@ -26,20 +25,21 @@ from emerge.events import Event, EventType
 from emerge.runtime import RUN_IDLE, RUN_STATUS
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="emerge", description="EMERGE-Policy 2.0: talk to the main agent of a workspace.")
+def arguments(prog: str) -> argparse.ArgumentParser:
+    """The command line both front ends take."""
+    parser = argparse.ArgumentParser(prog=prog, description="EMERGE-Policy 2.0: talk to the main agent of a workspace.")
     parser.add_argument("--workspace", "-w", type=Path, default=Path("workspace"), help="workspace directory (default: ./workspace)")
-    parser.add_argument("--session", "-s", help="open this session and carry it on (default: the most recent one)")
+    parser.add_argument("--session", "-s", help="open this session and carry it on")
     parser.add_argument("--version", action="store_true", help="print the version and exit")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = arguments("python -m emerge").parse_args(argv)
     if args.version:
-        print(_version())
+        print(version_text())
         return 0
     try:
-        if sys.stdin.isatty():
-            from emerge.tui.app import run_tui
-
-            return asyncio.run(run_tui(args.workspace, args.session))
         logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="%(levelname)s %(name)s: %(message)s")
         return asyncio.run(headless(args.workspace, args.session))
     except StartupError as e:
@@ -100,7 +100,14 @@ async def headless(
     app = await Application.create(workspace, session_id=session_id, handlers=(output,), config=config)
     agent = app.agent
     try:
-        output.write({"type": "session", "session_id": app.session.id, "workspace": str(app.workspace)})
+        output.write(
+            {
+                "type": "session",
+                "session_id": app.session.id,
+                "workspace": str(app.workspace),
+                "session_dir": str(app.session_dir),
+            }
+        )
         submitted = 0
         while True:
             line = await asyncio.to_thread(source.readline)
@@ -122,7 +129,7 @@ def _cut(text: str, limit: int = 2000) -> str:
     return text if len(text) <= limit else text[:limit] + f"... ({len(text) - limit} more characters)"
 
 
-def _version() -> str:
+def version_text() -> str:
     try:
         return version("emerge")
     except PackageNotFoundError:

@@ -39,10 +39,10 @@
 | `model.options.max_output_tokens` | 单次最长输出 | 默认 16384，`> 0`，且 ≤ `model.limit.output` | `emerge/config.py:78,92-99` |
 | `model.options.reasoning_effort` | 推理强度 | 默认 `"medium"`；不校验取值；空串表示不发推理参数 | `emerge/config.py:80` |
 | `model.options.speed` | 速度档位 | `standard` / `fast` / `ultrafast`，默认 `standard`；当前 api_mode 支不支持，到 `create_provider` 时才检查 | `emerge/config.py:82` |
-| `agent.max_context_tokens` | 主 Agent 打算用的上下文上限（`emerge/agent/agent.py:307`） | 默认 100000，`> 0`，且 ≤ `model.limit.context` | `emerge/config.py:114,135-142` |
-| `agent.compact_threshold` | 从多大比例开始压缩（`emerge/agent/agent.py:308`） | 默认 0.8，范围 [0, 1] | `emerge/config.py:115` |
-| `agent.max_retries` | 单次模型请求的重试次数（`emerge/models/factory.py:66`） | 默认 3，`≥ 0` | `emerge/config.py:116` |
-| `agent.limits.max_iterations` / `max_input_tokens` / `max_output_tokens_total` / `max_tool_calls` | 每轮预算（`emerge/agent/agent.py:319`） | 每项默认 `None` = 不限；写了值须 `> 0`；`"limits": {}` 表示全部不限 | `emerge/config.py:102-108,117` |
+| `agent.max_context_tokens` | 主 Agent 打算用的上下文上限（`emerge/agent/agent.py:315`） | 默认 100000，`> 0`，且 ≤ `model.limit.context` | `emerge/config.py:114,135-142` |
+| `agent.compact_threshold` | 从多大比例开始压缩（`emerge/agent/agent.py:316`） | 默认 0.8，范围 [0, 1] | `emerge/config.py:115` |
+| `agent.max_retries` | 单次模型请求的重试次数（`emerge/models/factory.py:81`） | 默认 3，`≥ 0` | `emerge/config.py:116` |
+| `agent.limits.max_iterations` / `max_input_tokens` / `max_output_tokens_total` / `max_tool_calls` | 每轮预算（`emerge/agent/agent.py:327`） | 每项默认 `None` = 不限；写了值须 `> 0`；`"limits": {}` 表示全部不限 | `emerge/config.py:102-108,117` |
 | `runtime.stop_timeout` | 单位秒（`emerge/runtime/policies.py:24`） | 默认 30，`> 0` | `emerge/config.py:121` |
 | `runtime.port_buffer` | 每个输出端口保留的消息条数（`emerge/runtime/supervisor.py:202`） | 默认 64，`> 0` | `emerge/config.py:123` |
 | `nodes` | 节点模块名列表 | 默认 `[]`；目前没有代码读取 | `emerge/config.py:131` |
@@ -51,29 +51,29 @@
 
 | 属性 | 值 | 位置 |
 |---|---|---|
-| `workspace` | `load_config` 解析出的绝对路径。它存放在私有属性 `_workspace` 里，不是 JSON 字段 | `emerge/config.py:133,144-146` |
-| `config_path` | `<ws>/config.json` | `emerge/config.py:148-150` |
-| `agents_md`、`user_md` | `<ws>/AGENTS.md`、`<ws>/USER.md` | `emerge/config.py:152-158` |
-| `memory_md` | `<ws>/memory/MEMORY.md` | `emerge/config.py:160-162` |
-| `code_dir`、`runs_dir`、`skills_dir` | `<ws>/code`、`<ws>/runs`、`<ws>/skills` | `emerge/config.py:164-174` |
+| `workspace` | `load_config` 解析出的绝对路径。它存放在私有属性 `_workspace` 里，不是 JSON 字段 | `emerge/config.py:133,147-149` |
+| `config_path` | `<ws>/config.json` | `emerge/config.py:151-153` |
+| `agents_md`、`user_md` | `<ws>/AGENTS.md`、`<ws>/USER.md` | `emerge/config.py:155-161` |
+| `skills_dir` | `<ws>/skills` | `emerge/config.py:163-165` |
+| 对话里的路径 | 不在 `WorkspaceConfig` 上。`WorkspaceConfig` 只管所有对话共用的设置；一个对话的库、记忆、生成代码、运行都在 `<ws>/sessions/<session_id>/` 下，路径由 `storage.artifacts` 给出（04「artifacts.py：工作区、对话文件夹与路径」）。原来的 `memory_md`、`code_dir`、`runs_dir` 已去掉（2026-11-04） | `emerge/config.py:144-145` |
 | `ProvidersConfig.get(name)` | `name` 是 `openai` 或 `anthropic` 时返回对应条目（可能是 `None`）；其他名字返回 `None` | `emerge/config.py:63-64` |
 
 ### `load_config()`
 
-1. 确定目标目录：`workspace` 为 `None` 或空串时用 `~/.emerge/workspace`；否则用 `expanduser().resolve()` 的结果，相对路径按当前目录解析（`emerge/config.py:185,225`）。
-2. 按 UTF-8 读取 `config.json`，再 `json.loads`（`emerge/config.py:227-228`）。
-3. 调用 `WorkspaceConfig.model_validate`（`emerge/config.py:234`）。
-4. 把第 1 步得到的路径存进 `_workspace`（`emerge/config.py:237`）。
+1. 确定目标目录：`workspace` 为 `None` 或空串时用 `~/.emerge/workspace`；否则用 `expanduser().resolve()` 的结果，相对路径按当前目录解析（`emerge/config.py:176,214`）。
+2. 按 UTF-8 读取 `config.json`，再 `json.loads`（`emerge/config.py:216-217`）。
+3. 调用 `WorkspaceConfig.model_validate`（`emerge/config.py:223`）。
+4. 把第 1 步得到的路径存进 `_workspace`（`emerge/config.py:226`）。
 
-校验失败时的报错格式：先是 `invalid config <path>:`，然后每个错误一行 `  <字段路径>: <Pydantic 信息>`。字段路径用 `.` 连接，路径为空时写 `<root>`（`emerge/config.py:177-182`）。
+校验失败时的报错格式：先是 `invalid config <path>:`，然后每个错误一行 `  <字段路径>: <Pydantic 信息>`。字段路径用 `.` 连接，路径为空时写 `<root>`（`emerge/config.py:168-173`）。
 
 | 配置/情况 | 结果 | 位置 |
 |---|---|---|
-| `config.json` 不存在 | `ConfigError("config file not found: <path>")` | `emerge/config.py:229-230` |
-| JSON 语法错误（UTF-8 BOM 也算） | `ConfigError("invalid JSON in <path>: line L column C: <msg>")` | `emerge/config.py:231-232` |
-| 文件不是 UTF-8 编码 | `UnicodeDecodeError` 原样抛出，不是 `ConfigError`（实测） | `emerge/config.py:228` |
-| `config.json` 是个目录 / 工作区路径是个普通文件 / 没有读权限 | 分别是 `IsADirectoryError` / `NotADirectoryError` / `PermissionError`，原样抛出（前两种实测） | `emerge/config.py:228` |
-| 顶层不是 JSON 对象（例如 `[]`） | `ConfigError`，字段路径写 `<root>` | `emerge/config.py:180,235-236` |
+| `config.json` 不存在 | `ConfigError("config file not found: <path>")` | `emerge/config.py:218-219` |
+| JSON 语法错误（UTF-8 BOM 也算） | `ConfigError("invalid JSON in <path>: line L column C: <msg>")` | `emerge/config.py:220-221` |
+| 文件不是 UTF-8 编码 | `UnicodeDecodeError` 原样抛出，不是 `ConfigError`（实测） | `emerge/config.py:217` |
+| `config.json` 是个目录 / 工作区路径是个普通文件 / 没有读权限 | 分别是 `IsADirectoryError` / `NotADirectoryError` / `PermissionError`，原样抛出（前两种实测） | `emerge/config.py:217` |
+| 顶层不是 JSON 对象（例如 `[]`） | `ConfigError`，字段路径写 `<root>` | `emerge/config.py:171,224-225` |
 | 任意一层多写了字段：拼写错误、已删除的字段（`agent.max_iterations`、`agent.request_timeout`、`runtime.max_restarts`、`runtime.checkpoint`）、未知供应商（`providers.gemini`）、放错位置的专用参数（`model.options.thinking`、`providers.openai.options.thinking`、`providers.openai.options.include`） | `ConfigError`，报 `<字段路径>: Extra inputs are not permitted`（实测） | `emerge/config.py:14` |
 | 缺必填字段（`model`、`model.limit`、`model.provider` / `api_mode` / `name`、`providers.*.base_url`） | `ConfigError`，报 `Field required` | `emerge/config.py:20,86-89,128` |
 | `model.name` 或 `base_url` 为空串 | `ConfigError`，报 `String should have at least 1 character` | `emerge/config.py:20,88` |
@@ -86,25 +86,25 @@
 | 省略了 `agent` 或 `model.options`，而 `limit` 比默认值小（`context` < 100000 或 `output` < 16384） | `ConfigError`：默认值同样要通过上限检查（实测） | `emerge/config.py:78,114` |
 | 类型可以宽松转换的值，例如 `"timeout": "1000"`、`"max_output_tokens": 1.0`、`true` | 接受，分别转成 1000.0、1、1；整数字段给 `1.5` 则报错（Pydantic 宽松模式，实测） | — |
 | `"limits": null` | `ConfigError`：这里要求对象 | `emerge/config.py:117` |
-| `"providers": {}`，或某一家写 `null` | 加载通过；`create_client` 用到时报 `ConfigError` | `emerge/models/factory.py:60-62` |
-| provider 与 api_mode 搭配不对（例如 `anthropic` + `responses`） | 加载通过；`create_provider` 时报 `ModelAPIModeError` | `emerge/models/factory.py:31-33` |
-| 当前 api_mode 不支持所配的 `speed` | 加载通过；`create_provider` 时报 `ConfigError` | `emerge/models/factory.py:35-37` |
-| `api_key` 为空或没写 | 加载通过；`create_provider` 时报 `ConfigError("providers.<name>.api_key is empty")` | `emerge/models/factory.py:38-39` |
+| `"providers": {}`，或某一家写 `null` | 加载通过；`create_client` 用到时报 `ConfigError` | `emerge/models/factory.py:73` |
+| provider 与 api_mode 搭配不对（例如 `anthropic` + `responses`） | 加载通过；`create_provider` 时报 `ModelAPIModeError` | `emerge/models/factory.py:34-36` |
+| 当前 api_mode 不支持所配的 `speed` | 加载通过；`create_provider` 时报 `ConfigError` | `emerge/models/factory.py:38-40` |
+| `api_key` 为空或没写 | 加载通过；`create_provider` 时报 `ConfigError("providers.<name>.api_key is empty")` | `emerge/models/factory.py:41-42` |
 | 加载后修改字段 | `ValidationError`（frozen） | `emerge/config.py:14` |
-| 不经 `load_config`，直接 `WorkspaceConfig.model_validate(...)` | 校验规则相同；但 `workspace` 和所有路径属性都会抛 `AttributeError`（`_workspace` 没有设置），所以 `create_client` 也会失败（实测） | `emerge/config.py:133,144-146` |
+| 不经 `load_config`，直接 `WorkspaceConfig.model_validate(...)` | 校验规则相同；但 `workspace` 和所有路径属性都会抛 `AttributeError`（`_workspace` 没有设置），所以 `create_client` 也会失败（实测） | `emerge/config.py:133,147-149` |
 
 ### `init_workspace()`
 
 | 情况 | 结果 | 位置 |
 |---|---|---|
-| `workspace` 为 `None` 或空串 | 目标是 `~/.emerge/workspace` | `emerge/config.py:211` |
-| 给了路径 | 用 `expanduser().resolve()` 后的路径 | `emerge/config.py:211` |
-| 目标已存在（目录、空目录或普通文件都算） | 返回 `False`，不做任何改动（实测） | `emerge/config.py:212-213` |
-| 目标不存在 | 建目录（包括父目录）；按 `_TEMPLATE_FILES` 逐个用 `shutil.copy2` 复制 8 个文件（保留权限和时间戳）；返回 `True` | `emerge/config.py:188-197,214-221` |
-| 复制到一半失败（磁盘满、模板缺文件） | 异常原样抛出；已建的目录和已复制的文件都留着。再调用时目标已存在，直接返回 `False`，不会补齐 | `emerge/config.py:212-220` |
-| 模板目录里有、但不在 `_TEMPLATE_FILES` 中的文件 | 不复制 | `emerge/config.py:188-197` |
-| 模板目录的位置 | 包内的 `emerge/workspace_template/`；`pyproject.toml` 用 `force-include` 把它打进 wheel | `emerge/config.py:200-202`；`pyproject.toml:28-30` |
-| 与 `load_config` 的关系 | `load_config` 不会调用它；工作区不存在时 `load_config` 报 “config file not found” | `emerge/config.py:224-230` |
+| `workspace` 为 `None` 或空串 | 目标是 `~/.emerge/workspace` | `emerge/config.py:200` |
+| 给了路径 | 用 `expanduser().resolve()` 后的路径 | `emerge/config.py:200` |
+| 目标已存在（目录、空目录或普通文件都算） | 返回 `False`，不做任何改动（实测） | `emerge/config.py:201-202` |
+| 目标不存在 | 建目录（包括父目录）；按 `_TEMPLATE_FILES` 逐个用 `shutil.copy2` 复制 5 个文件（保留权限和时间戳）：`config.json`、`AGENTS.md`、`USER.md` 和两份 skill。对话文件夹 `sessions/<id>/` 不在模板里，打开对话时才建；返回 `True` | `emerge/config.py:178-186,203-210` |
+| 复制到一半失败（磁盘满、模板缺文件） | 异常原样抛出；已建的目录和已复制的文件都留着。再调用时目标已存在，直接返回 `False`，不会补齐 | `emerge/config.py:201-209` |
+| 模板目录里有、但不在 `_TEMPLATE_FILES` 中的文件 | 不复制 | `emerge/config.py:180-186` |
+| 模板目录的位置 | 包内的 `emerge/workspace_template/`；`pyproject.toml` 用 `force-include` 把它打进 wheel | `emerge/config.py:189-191`；`pyproject.toml:28-30` |
+| 与 `load_config` 的关系 | `load_config` 不会调用它；工作区不存在时 `load_config` 报 “config file not found” | `emerge/config.py:213-219` |
 
 ---
 
@@ -140,7 +140,7 @@
 |---|---|---|---|
 | `type` | 事件类型：`EventType` 成员或任意字符串 | 必填 | `emerge/events.py:36` |
 | `timestamp` | Unix 时间戳（秒） | 默认取创建时的 `time.time()` | `emerge/events.py:37` |
-| `run_id`、`node_id`、`irreversible` | 所属运行、节点，是否来自不可逆节点 | 默认 `None`；由视图、主 Agent 的 `_RunEvents` 或 bus 补填 | `emerge/events.py:38-39,46` |
+| `run_id`、`node_id`、`acts_on_environment` | 所属运行、节点，是否来自作用于环境的节点 | 默认 `None`；由视图、主 Agent 的 `_RunEvents` 或 bus 补填 | `emerge/events.py:38-39,46` |
 | `instance_id` | 产生事件的节点实例。节点被替换后 id 不变，靠这个字段丢弃旧实例的迟到事件 | 默认 `None` | `emerge/events.py:42` |
 | `content_time` | 运行内全图时间线上的位置。bus 只给节点与主 Agent 之间传的内容盖这个戳；模型 token 之类的过程事件为 `None` | 默认 `None` | `emerge/events.py:45` |
 | `payload` | 任意 dict | 默认 `{}`；不检查能否 JSON 序列化 | `emerge/events.py:47` |
@@ -149,7 +149,7 @@
 
 | 常量 | 值 | 发出位置 |
 |---|---|---|
-| `RUN_STARTED` / `RUN_FINISHED` | `run.started` / `run.finished` | `emerge/runtime/service.py:160` / `:340`；`JsonlTracer` 收到 `run.finished` 后关闭这个 run 的文件 |
+| `RUN_STARTED` / `RUN_FINISHED` | `run.started` / `run.finished` | `emerge/runtime/service.py:162` / `:340`；`JsonlTracer` 收到 `run.finished` 后关闭这个 run 的文件 |
 | `NODE_STATE` | `node.state` | `emerge/runtime/bus.py:254` |
 | `NODE_REPORT` | `node.report` | `emerge/runtime/bus.py:420` |
 | `NODE_CUSTOM` | `node.custom` | 节点调 `emit_event` 发出（`emerge/runtime/context.py:326-336`），经 bus 盖时间戳后转发（`emerge/runtime/bus.py:438-444`） |
@@ -161,13 +161,13 @@
 | `TOOL_STARTED` / `TOOL_FINISHED` | `tool.started` / `tool.finished` | `emerge/agent/loop.py:236` / `:243` |
 | `GRAPH_PATCHED` | `graph.patched` | `emerge/runtime/mutations.py:175` |
 | `AGENT_MESSAGE` | `agent.message` | `emerge/agent/loop.py:95,115,177` |
-| 不在 `EventType` 里的类型 | `node.stale`、`run.status`、`run.idle`、`agent.turn`、`agent.inbox`、`agent.fork`、`agent.control` | `emerge/runtime/bus.py:41`、`emerge/runtime/run.py:28,30`、`emerge/agent/agent.py:70-76`。它们没有对应的具名钩子，只能在 `on_event` 里收到 |
+| 不在 `EventType` 里的类型 | `node.stale`、`run.status`、`run.idle`、`agent.turn`、`agent.inbox`、`agent.fork`、`agent.control` | `emerge/runtime/bus.py:41`、`emerge/runtime/run.py:29,31`、`emerge/agent/agent.py:72-78`。它们没有对应的具名钩子，只能在 `on_event` 里收到 |
 
 ---
 
 ## 事件分发：`emerge/callbacks/`
 
-`CallbackManager` 把事件扇出给已注册的 handler：每个 handler 有自己的无上限 `asyncio.Queue` 和一个消费任务，`emit` 只负责入队。`RuntimeService.open` 会注册 tracer、feedback、stream 三个 handler（`emerge/runtime/service.py:135-137`）。`ModelClient`、`AgentLoop`、bus 通过 `EventEmitter` 协议发事件。计划里的 `add` / `remove` / `child()` 已改名为 `add_handler` / `remove_handler` / `with_event_defaults`（`EMERGE-Policy-2.0-Plan/refactor-api-naming.md:121-123`）。
+`CallbackManager` 把事件扇出给已注册的 handler：每个 handler 有自己的无上限 `asyncio.Queue` 和一个消费任务，`emit` 只负责入队。`RuntimeService.open` 会注册 tracer、feedback、stream 三个 handler（`emerge/runtime/service.py:137-139`）。`ModelClient`、`AgentLoop`、bus 通过 `EventEmitter` 协议发事件。计划里的 `add` / `remove` / `child()` 已改名为 `add_handler` / `remove_handler` / `with_event_defaults`（`EMERGE-Policy-2.0-Plan/refactor-api-naming.md:121-123`）。
 
 ### 分发顺序
 
@@ -185,7 +185,7 @@
 | 事件类型是 `EventType` 里的值 | 默认 `on_event` 调用对应的具名钩子（17 个，默认都什么也不做） | `emerge/callbacks/base.py:17-19,24-73` |
 | 事件类型不在 `EventType` 里（例如 `run.status`） | 默认 `on_event` 直接返回；只有覆盖了 `on_event` 的 handler 才能看到它 | `emerge/callbacks/base.py:17-18` |
 | 类型字符串恰好是 `"event"` 这样的任意值 | 不会被路由到 `on_event` 自己，因为 `_HOOKS` 只包含已知类型 | `emerge/callbacks/base.py:5-6` |
-| 子类覆盖了 `on_event` 且不调用 `super()`（例如 `JsonlTracer`） | 具名钩子不再被调用 | `emerge/callbacks/tracers.py:20` |
+| 子类覆盖了 `on_event` 且不调用 `super()`（例如 `JsonlTracer`） | 具名钩子不再被调用 | `emerge/callbacks/tracers.py:22` |
 | `close()` | worker 停止时调用一次（handler 被移除或 manager 关闭时） | `emerge/callbacks/base.py:21-22` |
 
 ### `CallbackManager`（`manager.py`）
@@ -216,49 +216,48 @@
 
 | 情况 | 处理 | 位置 |
 |---|---|---|
-| `manager.with_event_defaults(run_id=…, node_id=…, irreversible=…)` | 返回一个 `CallbackView`；值为 `None` 的参数不计入默认值 | `emerge/callbacks/manager.py:85-88,124` |
-| 通过视图发事件 | 只填事件里为 `None` 的 `run_id` / `node_id` / `irreversible`。用 `dataclasses.replace` 生成新对象，原事件不变；没有需要填的字段时原样转发 | `emerge/callbacks/manager.py:139-141` |
+| `manager.with_event_defaults(run_id=…, node_id=…, acts_on_environment=…)` | 返回一个 `CallbackView`；值为 `None` 的参数不计入默认值 | `emerge/callbacks/manager.py:85-88,124` |
+| 通过视图发事件 | 只填事件里为 `None` 的 `run_id` / `node_id` / `acts_on_environment`。用 `dataclasses.replace` 生成新对象，原事件不变；没有需要填的字段时原样转发 | `emerge/callbacks/manager.py:139-141` |
 | 事件本身已带值 | 保留，不被默认值覆盖（实测） | `emerge/callbacks/manager.py:140` |
 | 在视图上再调用 `with_event_defaults` | 父视图的默认值加上新给的非 `None` 值，新值优先。传 `None` 不能清掉继承来的默认值（实测） | `emerge/callbacks/manager.py:132-137` |
 | 视图的 `emit` / `emit_nowait` | 都转给 manager 的 `emit_nowait` | `emerge/callbacks/manager.py:126-130` |
 | `instance_id`、`content_time` | 视图不填这两个字段 | `emerge/callbacks/manager.py:135` |
-| `EventEmitter` 协议 | 包含 `emit`、`emit_nowait`、`with_event_defaults` 三个方法。实现它的有：manager、视图、主 Agent 的 `_RunEvents`（`emerge/agent/agent.py:144-160`，每个事件的 `run_id` 都改成当前运行）、节点进程里的 `_BusEmitter`（`emerge/runtime/context.py:103-117`，把事件经管道发给 bus，由 bus 填写各字段） | `emerge/callbacks/manager.py:15-22` |
+| `EventEmitter` 协议 | 包含 `emit`、`emit_nowait`、`with_event_defaults` 三个方法。实现它的有：manager、视图、主 Agent 的 `_RunEvents`（`emerge/agent/agent.py:167-183`，每个事件的 `run_id` 都改成当前运行）、节点进程里的 `_BusEmitter`（`emerge/runtime/context.py:103-117`，把事件经管道发给 bus，由 bus 填写各字段） | `emerge/callbacks/manager.py:15-22` |
 
 ### `JsonlTracer`（`tracers.py`）
 
-把每个事件写成一行 JSON，追加到 `<runs_dir>/<run_id>/trace.jsonl`。由 `RuntimeService` 创建（`emerge/runtime/service.py:120`）。
+把每个事件写成一行 JSON，追加到 `path_of(event.run_id)` 给出的文件。由 `RuntimeService` 创建（`emerge/runtime/service.py:122`），`path_of` 是 `partial(storage.artifacts.trace_file, 对话文件夹)`：有运行的事件写 `<对话文件夹>/runs/<run_id>/trace.jsonl`，没有运行的写 `<对话文件夹>/trace.jsonl`（`emerge/storage/artifacts.py:63-65`）。tracer 自己不拼路径（`emerge/callbacks/tracers.py:11-20`）。
 
 | 情况 | 处理 | 位置 |
 |---|---|---|
-| 收到任意事件 | 用 `json.dumps(event.to_dict(), ensure_ascii=False)` 序列化，再经 `asyncio.to_thread` 写入。同一个 handler 的事件是串行处理的，所以写文件不会并发 | `emerge/callbacks/tracers.py:20-22` |
-| `run_id` 为 `None` 或空串 | 写到 `<runs_dir>/_session/trace.jsonl`（实测） | `emerge/callbacks/tracers.py:22` |
-| 某个 key 第一次出现 | 先建目录（包括父目录），再以追加模式 `"a"`、UTF-8 编码打开文件，并缓存句柄 | `emerge/callbacks/tracers.py:28-32` |
-| 每写一行 | `write` 后立即 `flush`（不做 fsync） | `emerge/callbacks/tracers.py:33-34` |
-| 事件是 `run.finished` | 写完这一行后，关闭该 key 的文件并移出缓存 | `emerge/callbacks/tracers.py:35-36` |
-| `run.finished` 之后同一个 run 又来了事件 | 以追加模式重新打开文件（实测） | `emerge/callbacks/tracers.py:28-32` |
-| `run.finished` 的 `run_id` 为 `None` | 被关闭的是 `_session` 文件 | `emerge/callbacks/tracers.py:22,35-36` |
-| `payload` 不能序列化成 JSON（例如含 `Path`） | 抛 `TypeError`，由 worker 记录；这一条不写入，后续事件照常写（实测） | `emerge/callbacks/tracers.py:21`；`emerge/callbacks/manager.py:38-39` |
-| 打开或写入失败（权限不足、磁盘满） | 异常同样由 worker 记录；如果是打开失败，下一个事件会再尝试打开 | `emerge/callbacks/tracers.py:28-33` |
-| `close()`（handler 被移除或 manager 关闭时） | 在线程里关闭所有句柄 | `emerge/callbacks/tracers.py:24-25,38-41` |
+| 收到任意事件 | 用 `json.dumps(event.to_dict(), ensure_ascii=False)` 序列化，再经 `asyncio.to_thread` 写入。同一个 handler 的事件是串行处理的，所以写文件不会并发 | `emerge/callbacks/tracers.py:22-24` |
+| `run_id` 为 `None` 或空串 | 都按 None 处理，写到对话文件夹的 `trace.jsonl`（原来是 `runs/_session/trace.jsonl`） | `emerge/callbacks/tracers.py:24` |
+| 某个 key 第一次出现 | 先建目录（包括父目录），再以追加模式 `"a"`、UTF-8 编码打开文件，并缓存句柄 | `emerge/callbacks/tracers.py:30-34` |
+| 每写一行 | `write` 后立即 `flush`（不做 fsync） | `emerge/callbacks/tracers.py:35-36` |
+| 事件是 `run.finished` | 写完这一行后，关闭该 key 的文件并移出缓存 | `emerge/callbacks/tracers.py:37-38` |
+| `run.finished` 之后同一个 run 又来了事件 | 以追加模式重新打开文件（实测） | `emerge/callbacks/tracers.py:30-34` |
+| `run.finished` 的 `run_id` 为 `None` | 被关闭的是对话文件夹的 `trace.jsonl` | `emerge/callbacks/tracers.py:24,37-38` |
+| `payload` 不能序列化成 JSON（例如含 `Path`） | 抛 `TypeError`，由 worker 记录；这一条不写入，后续事件照常写（实测） | `emerge/callbacks/tracers.py:23`；`emerge/callbacks/manager.py:38-39` |
+| 打开或写入失败（权限不足、磁盘满） | 异常同样由 worker 记录；如果是打开失败，下一个事件会再尝试打开 | `emerge/callbacks/tracers.py:30-35` |
+| `close()`（handler 被移除或 manager 关闭时） | 在线程里关闭所有句柄 | `emerge/callbacks/tracers.py:26-27,40-43` |
 | 读回 | 每一行都能用 `Event.from_dict(json.loads(line))` 还原（实测） | `emerge/events.py:54-56` |
 
 ---
 
 ## 工作区模板与打包：`emerge/workspace_template/`、`pyproject.toml`、`README.md`
 
-模板随包一起分发，`init_workspace()` 把 `_TEMPLATE_FILES` 列出的 8 个文件复制到运行时工作区。
+模板随包一起分发，`init_workspace()` 把 `_TEMPLATE_FILES` 列出的 5 个文件复制到运行时工作区。模板里只有所有对话共用的设置；每个对话自己的 `memory/`、`code/`、`runs/` 在 `sessions/<id>/` 下，用到时才建。
 
 | 文件 | 内容 |
 |---|---|
 | `config.json` | 两家 providers 都已配好，`api_key` 是占位串 `your-openai-key` / `your-anthropic-key`。占位串不为空，所以 `create_provider` 不会报 “key 为空”，真实请求会返回 401。`model` 为 openai / responses / `gpt-6.1-sol`，`limit` 为 1050000 / 128000；options：temperature 0.0、max_output_tokens 128000（等于上限，可以通过）、reasoning_effort `xhigh`、speed `standard`。agent：max_context_tokens 1000000、compact_threshold 0.8、max_retries 3、`limits` 为 `{}`。runtime：stop_timeout 30、port_buffer 64。`nodes` 为 `[]`。没有写 `timeout`，取默认值 600000 ms |
-| `AGENTS.md`、`USER.md`、`memory/MEMORY.md` | 各一两行，说明文件用途 |
-| `code/.gitkeep`、`runs/.gitkeep` | 占位文件，保证目录存在 |
-| `skills/sense-before-act.md` | front matter 含 `name`、`description`。正文：执行不可逆动作前，先在上游放一个感知节点确认前提，前提不成立就改图，不在一个节点里“先修正再执行” |
-| `skills/recovery-after-irreversible-failure.md` | 不可逆节点没有达到效果时：先用感知节点确认现场 → 判断属于四种情况中的哪一种 → 向前修正；不自动重试，不设计回滚 |
+| `AGENTS.md`、`USER.md` | 各一两行，说明文件用途 |
+| `skills/sense-before-act.md` | front matter 含 `name`、`description`。正文：执行作用于环境的动作前，先在上游放一个感知节点确认前提，前提不成立就改图，不在一个节点里“先修正再执行” |
+| `skills/recovery-after-environment-action-failure.md` | 作用于环境的节点没有达到效果时：先用感知节点确认现场 → 判断属于四种情况中的哪一种 → 向前修正；不自动重试，不设计回滚 |
 
 | 项 | 内容 | 位置 |
 |---|---|---|
-| 构建 | hatchling；wheel 的 `packages = ["emerge"]`；`force-include` 把 `emerge/workspace_template` 和 `emerge/agent/prompts` 打进 wheel；sdist 包含 `emerge`、README 和 pyproject | `pyproject.toml:1-3,23-33` |
+| 构建 | hatchling；wheel 的 `packages = ["emerge", "robot"]`（`robot/` 是机器人底层，见 docs/robot-interface.md）；`force-include` 把 `emerge/workspace_template` 和 `emerge/agent/prompts` 打进 wheel；sdist 包含 `emerge`、`robot`、README 和 pyproject | `pyproject.toml:1-3,23-33` |
 | Python | `>=3.12` | `pyproject.toml:10` |
 | 依赖 | pydantic 2.x、openai 1.x（≥ 1.35）、anthropic 1.x（≥ 1.15）、prompt_toolkit 3、rich 13、aiosqlite。`httpx` / `httpx2` 没有声明，由 openai / anthropic 带进来，但 `models/retry.py` 直接 import 它们。`tiktoken` 是可选依赖，没有声明，当前环境也没有安装。当前环境的版本：openai 1.109.1、anthropic 1.15.0、httpx 0.28.1、httpx2 2.13.1、pydantic 2.14.1 | `pyproject.toml:11-18`；`emerge/models/retry.py:10-11` |
 | 入口 | `emerge = "emerge.cli:main"`。`emerge/cli.py` 和 `emerge/__main__.py` 还不存在（阶段 9），所以 README 里写的 `emerge` / `python -m emerge` 目前不能运行 | `pyproject.toml:20-21`；`README.md:13-19` |
@@ -273,7 +272,7 @@
 | 类型.字段 | 含义 | 约束/默认 | 位置 |
 |---|---|---|---|
 | `TextPart.text` | 文字 | 必填 | `emerge/models/types.py:15-17` |
-| `ImagePart.path` | 工作区相对路径或绝对路径；发请求时才读文件并做 base64 | 必填 | `emerge/models/types.py:20-23` |
+| `ImagePart.path` | 相对路径或绝对路径。相对路径按 provider 的 `image_root` 读，主 Agent 和节点的模型客户端都把自己对话的文件夹作 `image_root`；发请求时才读文件并做 base64 | 必填 | `emerge/models/types.py:20-23` |
 | `ImagePart.detail` | `auto` / `low` / `high` | 默认 `None`。OpenAI 两种模式按 `auto` 发送；Anthropic 不使用这个字段 | `emerge/models/types.py:24` |
 | `ReasoningPart.text` | 模型思考内容的可读摘要；服务端没给时为空串 | 默认 `""`；只允许出现在 assistant 消息里；从不发给 API | `emerge/models/types.py:27-38` |
 | `Part` | 以上三种，按 `type` 区分 | — | `emerge/models/types.py:41` |
@@ -288,9 +287,10 @@
 | `Usage` | `input_tokens` / `output_tokens` / `total_tokens`（默认 0）、`cached_tokens` / `reasoning_tokens`（默认 `None`）、`speed`（服务端报告的档位原值） | — | `emerge/models/types.py:112-119` |
 | `ModelRequest.messages` / `tools` | 消息、工具 | `tools` 默认 `[]` | `emerge/models/types.py:136-137` |
 | `ModelRequest.native_items` | 原样追加在转换后的消息末尾；不按 provider / api_mode 过滤。目前仓库里没有调用方设置它 | 默认 `[]` | `emerge/models/types.py:138-139` |
-| `ModelRequest.tool_choice` | `auto` / `none` / `required` | 默认 `None`（不发送）；主 Agent 回答节点提问时用 `none`（`emerge/agent/agent.py:489`） | `emerge/models/types.py:140` |
+| `ModelRequest.tool_choice` | `auto` / `none` / `required` | 默认 `None`（不发送）；主 Agent 回答节点提问时用 `none`（`emerge/agent/agent.py:497`） | `emerge/models/types.py:140` |
 | `ModelRequest.temperature` / `max_output_tokens` / `reasoning_effort` / `speed` | 按请求覆盖 `model.options` | 默认 `None`，表示用配置值；请求级的数值不做范围校验 | `emerge/models/types.py:141-145` |
-| `ModelRequest.extra` | 原样并入 SDK 调用参数；主 Agent 对 openai 用它传 `prompt_cache_key`（`emerge/agent/agent.py:140-141,311`） | 默认 `{}` | `emerge/models/types.py:146-147` |
+| `ModelRequest.cache_key` | 同一个键的请求共用缓存前缀；provider 能用就用，不能用就忽略。主 Agent 设为会话 id（`emerge/agent/agent.py:144-145,340`） | 默认 `None`（不发送） | `emerge/models/types.py:146-147` |
+| `ModelRequest.extra` | 原样并入 SDK 调用参数 | 默认 `{}` | `emerge/models/types.py:148-149` |
 | `ModelResponse` | `message`、`native_items`（与 `message.native_items` 内容相同）、`response_id`、`usage`、`finish_reason` | `finish_reason` 默认 `stop`，取值为 `stop` / `tool_calls` / `length` / `content_filter` / `other` | `emerge/models/types.py:150-158` |
 | `TextDelta` / `ReasoningDelta` | `part`（这个片段属于 `content` 里的第几项，≥ 0）、`text`。同一个 `part` 的片段拼起来，就是那一项的最终文字 | `part` ≥ 0 | `emerge/models/types.py:165-174` |
 | `ToolCallDelta` | `index`（第几个工具调用）、`id` / `name`（该调用第一次出现时给出）、`arguments`（参数文本片段） | `id` / `name` 默认 `None`，`arguments` 默认 `""` | `emerge/models/types.py:177-182` |
@@ -341,7 +341,7 @@
 | 降级后的非流式请求也失败 | 异常原样上抛，`streaming` 仍为 `True`。如果 `retry.py` 重试，下一次还会先试流式（实测） | `emerge/models/base.py:69-70` |
 | 降级成功 | 这个 provider 实例从此只发非流式请求，并记 warning：`<provider> / <api_mode> refused to stream (<异常>); its requests go without streaming from now on` | `emerge/models/base.py:123-131` |
 | 非流式响应体不是 JSON（SDK 把它当 `str` 交回，例如中转对非流式请求回 SSE） | `ModelError("<base_url> answered a request without streaming with something other than JSON (it starts '<前 80 字符>')")`（实测） | `emerge/models/base.py:153-159` |
-| “降级”状态的作用范围 | 按 provider 实例记录：主 Agent 有一个；每个节点进程在第一次 `get_model_client()` 时各建一个。新进程重新从流式开始 | `emerge/agent/agent.py:191`；`emerge/runtime/context.py:365-371` |
+| “降级”状态的作用范围 | 按 provider 实例记录：主 Agent 有一个；每个节点进程在第一次 `get_model_client()` 时各建一个。新进程重新从流式开始 | `emerge/agent/agent.py:194`；`emerge/runtime/context.py:365-371` |
 | 并发请求共用一个 provider | 每个请求在开始时读取 `streaming`；某个请求降级，不影响已经在流式进行中的请求 | `emerge/models/base.py:58` |
 
 ### 启动探测：`_probe_streaming_first(ping)`
@@ -363,8 +363,8 @@
 | `require_parsed(resp, base_url)` | `resp` 是 `str` 时抛上表那条 `ModelError` | `emerge/models/base.py:153-159` |
 | `without_read_limit(timeout)` | 生成一个同类型的 Timeout：`read=None`，`connect` / `write` / `pool` 不变。所有非流式请求（包括 `_ping(False)`）都用它 | `emerge/models/base.py:162-169` |
 | `speed_params(provider, speed)` | `standard` → `{}`；不在 `speeds` 里 → `ModelError("<provider> / <api_mode> does not support speed '<speed>'")`；否则返回该档位的参数 | `emerge/models/base.py:172-177` |
-| `read_image(image, workspace)` | 先 `expanduser`。相对路径且给了 workspace 时拼到 workspace 下；workspace 为 `None` 时相对当前目录。读文件出现 `OSError` → `ModelError("cannot read image <path>: …")`（实测）。MIME 按扩展名猜，猜不出时用 `image/png`。不检查文件内容是不是图片，例如 `.txt` 会以 `text/plain` 发出 | `emerge/models/base.py:180-190` |
-| `image_data_url(image, workspace)` | 返回 `data:<mime>;base64,<数据>` | `emerge/models/base.py:193-195` |
+| `read_image(image, image_root)` | 先 `expanduser`。相对路径且给了 `image_root` 时拼到它下面；`image_root` 为 `None` 时相对当前目录。读文件出现 `OSError` → `ModelError("cannot read image <path>: …")`（实测）。MIME 按扩展名猜，猜不出时用 `image/png`。不检查文件内容是不是图片，例如 `.txt` 会以 `text/plain` 发出 | `emerge/models/base.py:180-190` |
+| `image_data_url(image, image_root)` | 返回 `data:<mime>;base64,<数据>` | `emerge/models/base.py:193-195` |
 | `parse_arguments(raw)` | `None` 或空串 → `{}`；JSON 解析失败 → `{"_raw": raw}`；解析结果不是对象（数组、数字、字符串、`null`）→ `{"_raw": raw}`（实测） | `emerge/models/base.py:198-205` |
 
 ---
@@ -386,7 +386,7 @@
 | tools | `{"type": "function", "name", "description", "parameters", "strict": false}`（R:155-159） | `{"type": "function", "function": {name, description, parameters}}`（C:182-186） | `{"name", "description", "input_schema"}`（A:157-160） |
 | tool_choice | 原样发送字符串（R:160-161） | 原样发送字符串（C:187-188） | `required` → `{"type": "any"}`，`auto` / `none` → `{"type": "auto"}` / `{"type": "none"}`（A:161-162）。决策记录说较新的模型对 `any` 返回 400（HANDOFF.md:144），代码没有拦截 |
 | speed 档位（`standard` 什么都不发） | `fast` → `service_tier: "fast"`；`ultrafast` → `service_tier: "ultrafast"`（R:50） | `fast` → `service_tier: "priority"`；不支持 `ultrafast`（C:54） | `fast` → `speed: "fast"`；不支持 `ultrafast`（A:54） |
-| 缓存 | 模型层不发任何缓存参数。主 Agent 在 provider 为 openai 时，经 `extra` 加上 `prompt_cache_key`（`emerge/agent/agent.py:140-141,311`；HANDOFF.md:826） | 同左 | 每个请求都带 `cache_control`。不能经 `extra` 传 `prompt_cache_key`：SDK 不认这个参数，会报 `TypeError`（实测） |
+| 缓存 | `request.cache_key` 非空时发 `prompt_cache_key: cache_key`（R:162-164） | 同左（C:189-191） | 每个请求都带 `cache_control`，`cache_key` 不发送（A:141-143）。也不能经 `extra` 传 `prompt_cache_key`：SDK 不认这个参数，会报 `TypeError`（实测） |
 | `extra` | 与 params 合并，`extra` 覆盖同名的键，包括 `model`、`store`、`include`（R:163） | 同左（C:190） | 先把算出来的 `extra_body` 与 `request.extra["extra_body"]` 合并（请求里的值优先），再与 params 合并（A:164-167） |
 | `extra` 里有 SDK 不认的键 | `TypeError: … got an unexpected keyword argument`；与内部显式传入的参数重名（例如 `stream`）时报 `got multiple values`（实测） | 同左；`stream_options` 也会重名 | 同左；`temperature`、`prompt_cache_key` 也属于不认的键（实测） |
 
@@ -454,42 +454,43 @@
 
 | 情况 | 结果 | 位置 |
 |---|---|---|
-| `(openai, anthropic_messages)`、`(anthropic, responses)`、`(anthropic, chat_completions)` | `ModelAPIModeError("unsupported provider / api_mode: <provider> / <api_mode>")`。这项检查排在 speed 和 key 检查之前（实测） | `emerge/models/factory.py:31-33` |
-| 配置的 `speed` 不被支持（C、A 的 `ultrafast`） | `ConfigError("model.options.speed '<speed>' is not supported by …")` | `emerge/models/factory.py:35-37` |
+| `(openai, anthropic_messages)`、`(anthropic, responses)`、`(anthropic, chat_completions)` | `ModelAPIModeError("unsupported provider / api_mode: <provider> / <api_mode>")`。这项检查排在 speed 和 key 检查之前（实测） | `emerge/models/factory.py:34-36` |
+| 配置的 `speed` 不被支持（C、A 的 `ultrafast`） | `ConfigError("model.options.speed '<speed>' is not supported by …")` | `emerge/models/factory.py:38-40` |
 | 请求级 `speed` 不被支持 | `ModelError`（实测） | `emerge/models/base.py:175-176` |
 
 ---
 
 ## 工厂与超时：`emerge/models/factory.py`
 
-`create_client(config, callbacks, limiter)` 把配置组装成 `ModelClient`。主 Agent（`emerge/agent/agent.py:191`）和节点进程的 `ctx.get_model_client()`（`emerge/runtime/context.py:365-371`，第一次调用时才创建，import 也推迟到这时）各建一个。
+`create_client(config, callbacks=None, limiter=None, *, image_root=None, provider=None)` 把配置组装成 `ModelClient`（`emerge/models/factory.py:60-84`）。`image_root` 是相对图片路径的根，`provider` 给了就代替配置里描述的那个（嵌入和测试用）。主 Agent（`emerge/agent/agent.py:218-220`，`image_root` 为对话文件夹）和节点进程的 `ctx.get_model_client()`（`emerge/runtime/context.py:365-371`，第一次调用时才创建，import 也推迟到这时）各建一个。
 
-### `create_provider(model, provider, workspace)` 的步骤
+### `create_provider(model, provider, image_root)` 的步骤
 
-1. 检查搭配是否支持，不支持就抛 `ModelAPIModeError`（`emerge/models/factory.py:31-33`）。
-2. 选实现类：anthropic 用 `AnthropicMessagesProvider`，否则从 `_OPENAI` 里按 api_mode 选（`emerge/models/factory.py:21-24,34`）。
-3. 检查 speed：不是 `standard` 且不在 `cls.speeds` 里就抛 `ConfigError`（`emerge/models/factory.py:35-37`）。
-4. 检查 `api_key`：为空就抛 `ConfigError`（`emerge/models/factory.py:38-39`）。
-5. 算超时：`silence = timeout / 1000` 秒；`connect = 30`，`read`、`write`、`pool` 都等于 `silence`（`emerge/models/factory.py:19,42-43`）。
-6. anthropic：先去掉 `base_url` 末尾的 `/`，再去掉一个 `/v1` 后缀（区分大小写，`/V1`、`/v1beta` 保持不变，实测）；然后建 `AsyncAnthropic(timeout=anthropic.Timeout(...), max_retries=0)`，交给 `AnthropicMessagesProvider(client, model, provider.options, workspace)`（`emerge/models/factory.py:44-49`）。
-7. openai：`base_url` 原样使用（需要自己带上 `/v1`）；建 `AsyncOpenAI(timeout=openai.Timeout(...), max_retries=0)`。Responses 会收到 `provider.options`，Chat Completions 不收任何 options（`emerge/models/factory.py:50-54`）。
+1. 检查搭配是否支持，不支持就抛 `ModelAPIModeError`（`emerge/models/factory.py:34-36`）。
+2. 选实现类：anthropic 用 `AnthropicMessagesProvider`，否则从 `_OPENAI` 里按 api_mode 选（`emerge/models/factory.py:21-24,37`）。
+3. 检查 speed：不是 `standard` 且不在 `cls.speeds` 里就抛 `ConfigError`（`emerge/models/factory.py:38-40`）。
+4. 检查 `api_key`：为空就抛 `ConfigError`（`emerge/models/factory.py:41-42`）。
+5. 算超时：`silence = timeout / 1000` 秒；`connect = 30`，`read`、`write`、`pool` 都等于 `silence`（`emerge/models/factory.py:19,45-46`）。
+6. anthropic：先去掉 `base_url` 末尾的 `/`，再去掉一个 `/v1` 后缀（区分大小写，`/V1`、`/v1beta` 保持不变，实测）；然后建 `AsyncAnthropic(timeout=anthropic.Timeout(...), max_retries=0)`，交给 `AnthropicMessagesProvider(client, model, provider.options, image_root)`（`emerge/models/factory.py:47-52`）。
+7. openai：`base_url` 原样使用（需要自己带上 `/v1`）；建 `AsyncOpenAI(timeout=openai.Timeout(...), max_retries=0)`。Responses 会收到 `provider.options`，Chat Completions 不收任何 options（`emerge/models/factory.py:53-57`）。
 
 | 情况 | 处理 | 位置 |
 |---|---|---|
-| `create_client` 时 `providers.<model.provider>` 为 `None` | `ConfigError("model.provider '<name>' has no entry in providers")`（实测） | `emerge/models/factory.py:60-62` |
-| `create_client` 收到的 config 不是由 `load_config` 得到的 | 读 `config.workspace` 时抛 `AttributeError`（实测） | `emerge/models/factory.py:64` |
-| 重试策略 | `RetryPolicy(max_retries=config.agent.max_retries)`，其余用默认值（`base_delay` 1 s、`max_delay` 30 s） | `emerge/models/factory.py:66` |
-| limiter | 默认是 `None`，`ModelClient` 会自己建一个不限并发的；仓库里没有调用方传入 limiter | `emerge/models/factory.py:67`；`emerge/models/client.py:27` |
-| SDK 自带的重试 | 关闭（`max_retries=0`），只由 `retry.py` 负责重试 | `emerge/models/factory.py:48,50` |
-| 两个 SDK 的 Timeout 类 | 各用各的：Anthropic SDK 1.15 用它自带的 httpx2，只认 `anthropic.Timeout`（它就是 `httpx2.Timeout`，实测）；OpenAI 用 `openai.Timeout`（即 `httpx.Timeout`） | `emerge/models/factory.py:3-6,47-50` |
+| `create_client` 时 `providers.<model.provider>` 为 `None` | `ConfigError("model.provider '<name>' has no entry in providers")`（实测） | `emerge/models/factory.py:74-76` |
+| 给了 `provider` | 直接用它，不读 `config.providers`，也不建 SDK 客户端；`image_root` 对它不起作用 | `emerge/models/factory.py:73-77` |
+| `create_client` 收到的 config 不是由 `load_config` 得到的 | 照常建；它不读 `config.workspace`（原来读，会抛 `AttributeError`） | `emerge/models/factory.py:73-84` |
+| 重试策略 | `RetryPolicy(max_retries=config.agent.max_retries)`，其余用默认值（`base_delay` 1 s、`max_delay` 30 s） | `emerge/models/factory.py:81` |
+| limiter | 默认是 `None`，`ModelClient` 会自己建一个不限并发的；仓库里没有调用方传入 limiter | `emerge/models/factory.py:82`；`emerge/models/client.py:27` |
+| SDK 自带的重试 | 关闭（`max_retries=0`），只由 `retry.py` 负责重试 | `emerge/models/factory.py:51,53` |
+| 两个 SDK 的 Timeout 类 | 各用各的：Anthropic SDK 1.15 用它自带的 httpx2，只认 `anthropic.Timeout`（它就是 `httpx2.Timeout`，实测）；OpenAI 用 `openai.Timeout`（即 `httpx.Timeout`） | `emerge/models/factory.py:3-6,50-53` |
 
 ### 断线判断（按静默时长）
 
 | 阶段 | 限制 | 位置 |
 |---|---|---|
 | 建立连接 | 30 秒（`CONNECT_TIMEOUT`）。建连不涉及模型思考，短一些不会误伤 | `emerge/models/factory.py:18-19` |
-| 流式读取 | 连续 `timeout / 1000` 秒一个字节都没收到，就抛 `httpx.ReadTimeout` / `httpx2.ReadTimeout`。SSE 注释心跳和 Anthropic 的 `ping` 都算字节，所以模型思考多久都可以。实测：上限 0.8 s，每 0.3 s 一次心跳、持续 1.8 s，请求成功；完全不发数据时，0.8 s 后超时 | `emerge/models/factory.py:40-43` |
-| 写入、等待连接池 | 同样是 `timeout / 1000` 秒 | `emerge/models/factory.py:43` |
+| 流式读取 | 连续 `timeout / 1000` 秒一个字节都没收到，就抛 `httpx.ReadTimeout` / `httpx2.ReadTimeout`。SSE 注释心跳和 Anthropic 的 `ping` 都算字节，所以模型思考多久都可以。实测：上限 0.8 s，每 0.3 s 一次心跳、持续 1.8 s，请求成功；完全不发数据时，0.8 s 后超时 | `emerge/models/factory.py:43-46` |
+| 写入、等待连接池 | 同样是 `timeout / 1000` 秒 | `emerge/models/factory.py:46` |
 | 非流式读取（降级后的请求、`_ping(False)`） | 不限（`read=None`）；connect、write、pool 照旧受限。实测：上限 0.8 s，非流式请求 1.6 s 后才返回，仍然成功 | `emerge/models/base.py:162-169`；R:104、C:130、A:100 |
 | 一次调用的总时长 | 不限：`RetryPolicy` 没有自己的计时（`request_timeout` 已删除，HANDOFF.md:542） | `emerge/models/retry.py:23-24` |
 | 超时之后 | 还没交出增量 → 按可重试的网络错误处理；已经交出过 → `ModelError`（见“重试”一节） | `emerge/models/retry.py:110-112` |
@@ -528,7 +529,7 @@
 | `retry-after` 是 HTTP 日期、解析失败、没有这个头，或者错误不是状态错误 | 在 `0` 到 `min(30, 1 × 2^attempt)` 之间均匀随机取值：第 1 次重试前 0–1 s，第 2 次 0–2 s，第 3 次 0–4 s……最多 30 s | `emerge/models/retry.py:33,123-129` |
 | `retry-after-ms` 头 | 不读取 | `emerge/models/retry.py:125` |
 | 每次退避 | 记一条 warning：`model request failed (<描述>), retry i/N in X.Xs` | `emerge/models/retry.py:116-119` |
-| 总尝试次数 | `max_retries + 1`。`agent.max_retries` 默认为 3，即最多 4 次；`max_retries=0` 时只试 1 次（实测：`max_retries=2` 时 500 出现 3 次后报错） | `emerge/models/retry.py:80,110`；`emerge/models/factory.py:66` |
+| 总尝试次数 | `max_retries + 1`。`agent.max_retries` 默认为 3，即最多 4 次；`max_retries=0` 时只试 1 次（实测：`max_retries=2` 时 500 出现 3 次后报错） | `emerge/models/retry.py:80,110`；`emerge/models/factory.py:81` |
 | 更快档位遇到 429 | 同样按 `retry-after` 重试，不会自动降回 `standard`（HANDOFF.md:258） | — |
 
 ### `retry_stream` 的流程
@@ -566,7 +567,7 @@
 
 ### 事件的 payload
 
-所有事件都带 `call_id`（uuid4 十六进制的前 12 位）、`provider`、`api_mode`、`model`（配置里的模型名，未传时为 `""`）（`emerge/models/client.py:73,90-91`）。事件本身的 `run_id` / `node_id` 都是 `None`，由注入的 emitter 补填：主 Agent 的 `_RunEvents` 写入当前运行（`emerge/agent/agent.py:153-154`）；节点进程的 `_BusEmitter` 经管道发给 bus，由 bus 填写 run、node、instance 和 irreversible，不盖 `content_time`（`emerge/runtime/bus.py:428-441`）。
+所有事件都带 `call_id`（uuid4 十六进制的前 12 位）、`provider`、`api_mode`、`model`（配置里的模型名，未传时为 `""`）（`emerge/models/client.py:73,90-91`）。事件本身的 `run_id` / `node_id` 都是 `None`，由注入的 emitter 补填：主 Agent 的 `_RunEvents` 写入当前运行（`emerge/agent/agent.py:155-156`）；节点进程的 `_BusEmitter` 经管道发给 bus，由 bus 填写 run、node、instance 和 acts_on_environment，不盖 `content_time`（`emerge/runtime/bus.py:428-441`）。
 
 | 事件 | 额外的 payload | 什么时候发 | 位置 |
 |---|---|---|---|
@@ -609,7 +610,7 @@
 | 消息没有 `native_items` | `4 + 各 TextPart 的估算 + 图片 + 每个工具调用（名字 + json(arguments)）`。图片 `low` 算 85，`auto`、`high`、`None` 都算 765；`ReasoningPart` 和 `tool_call_id` 不计 | `emerge/models/usage.py:13-14,48-56` |
 | `estimate_tokens(messages, tools, native_items)` | 各消息的估算，加上每个 `ToolSpec` 的 `json.dumps(model_dump())`，再加上 `request.native_items` | `emerge/models/usage.py:59-65` |
 | `UsageTracker.record(usage, **payload)` | `total = total + usage`（`speed` 被丢掉）；`requests += 1`；有 callbacks 时发 `model.usage`，payload 是调用方传入的字段加上 `usage`（本次的 `model_dump()`，含 `speed`） | `emerge/models/usage.py:76-80` |
-| `UsageTracker.total` / `requests` | 只在本进程累计，仓库里没有代码读取。总量由主进程汇总事件得到；主 Agent 另外在 `emerge/agent/agent.py:556-559` 自己累加 | `emerge/models/usage.py:73-74` |
+| `UsageTracker.total` / `requests` | 只在本进程累计，仓库里没有代码读取。总量由主进程汇总事件得到；主 Agent 另外在 `emerge/agent/agent.py:561-564` 自己累加 | `emerge/models/usage.py:73-74` |
 
 ---
 
@@ -618,8 +619,8 @@
 | # | 疑点 | 证据 |
 |---|---|---|
 | 1 | Anthropic 在流中途发来的错误不会重试。`overloaded_error` 这类以 SSE `event: error` 形式到达的错误，SDK 按流响应的状态码 200 构造 `APIStatusError`；`is_retryable` 只认 408 / 409 / 429 / ≥ 500，所以即使一个增量都还没交出，也只试 1 次就报 `ModelError`。决策记录写的是 5xx / 429 可重试（HANDOFF.md:132） | `emerge/models/retry.py:63-64`；用模拟流实测，报错为 `failed after 1 attempt(s): HTTP 200: {… overloaded_error …}` |
-| 2 | 非 `ModelError` 的异常会绕过统一处理：不发 `model.finished`，不包装，不重试。例如 Chat 非流式回包的 `choices` 为空时抛 `IndexError`；`extra` 里有 SDK 不认的键时抛 `TypeError`；回包缺字段时可能抛 `AttributeError` 或 `ValidationError`。HANDOFF.md:498 记录过同类现象，当时只修了“回包是字符串”这一种情况 | `emerge/models/client.py:59`；`emerge/models/providers/openai/chat_completions.py:133`；实测 `IndexError` 时只有 `model.started` 事件 |
-| 3 | 空 `api_key` 的处理，计划与代码不一致：phase-02-models.md:89 写的是“为空字符串时不传给 SDK（本地模型）”，代码则抛 `ConfigError`（与 HANDOFF.md:130 一致）。按计划写法配置本地模型会被拒绝 | `emerge/models/factory.py:38-39` |
+| 2 | 非 `ModelError` 的异常会绕过统一处理：不发 `model.finished`，不包装，不重试。例如 Chat 非流式回包的 `choices` 为空时抛 `IndexError`；`extra` 里有 SDK 不认的键时抛 `TypeError`；回包缺字段时可能抛 `AttributeError` 或 `ValidationError`。HANDOFF.md:498 记录过同类现象，当时只修了“回包是字符串”这一种情况 | `emerge/models/client.py:59`；`emerge/models/providers/openai/chat_completions.py:134`；实测 `IndexError` 时只有 `model.started` 事件 |
+| 3 | 空 `api_key` 的处理，计划与代码不一致：phase-02-models.md:89 写的是“为空字符串时不传给 SDK（本地模型）”，代码则抛 `ConfigError`（与 HANDOFF.md:130 一致）。按计划写法配置本地模型会被拒绝 | `emerge/models/factory.py:41-42` |
 | 4 | `Retry-After` 没有完全遵守：等待时长被截到 30 s；HTTP 日期格式不解析，退回指数退避；`retry-after-ms` 不读。决策记录写的是“遵守 Retry-After”（HANDOFF.md:132） | `emerge/models/retry.py:30-33,122-129` |
 | 5 | 无法按请求关闭推理：`request.reasoning_effort=""` 会因为 `or` 回落到配置值。这与“为 None 时取配置”的说明不符（`emerge/models/types.py:141`、HANDOFF.md:136）。`max_output_tokens` 也用了 `or`，不过 0 本身就不合法 | R:152、C:179、A:151（实测：请求给 `""`、配置为 `medium` 时仍发 `medium`） |
 | 6 | 流在没有完成标志时结束，三家处理不同：Responses 报 `ModelError`，即使一个增量都没交出也不重试；Chat 当作正常的 `stop`，内容被截断也察觉不到；Anthropic 有内容就照常返回 | R:98-99；C:268；A:221-222,247（均有实测） |
@@ -627,5 +628,5 @@
 | 8 | 换了 provider 之后，只含思考的 assistant 消息会被重建成空消息：Chat 发出 `{"role": "assistant", "content": null}`，Anthropic 发出 `content: []`，两家 API 很可能拒绝；Responses 则直接跳过这条消息。未用真实 API 验证 | C:206-216；A:195-199（转换结果实测） |
 | 9 | `model.finished.streamed` 读的是 provider 此刻的标志，而不是这一次请求实际走的路径。同一个 client 上有并发请求、其中一个降级时，另一个已经流式完成的请求也会报 `streamed: false` | `emerge/models/client.py:86` |
 | 10 | callbacks 的异常隔离只覆盖 `Exception`。handler 抛出 `CancelledError` 这类 `BaseException` 时，它的 worker 会退出，之后的事件在队列里堆积，`close()` 不被调用，`aclose()` 还会把 `CancelledError` 抛给调用方（实测）。计划要求“不影响调用方”（phase-01-callbacks.md:36） | `emerge/callbacks/manager.py:36-39,97` |
-| 11 | `load_config` 只把“文件缺失、JSON 错误、校验失败”转成 `ConfigError`。文件不是 UTF-8、`config.json` 是目录、工作区路径是文件、没有读权限时，抛出的是原始的 `UnicodeDecodeError` / `IsADirectoryError` / `NotADirectoryError` / `PermissionError`（前三种实测） | `emerge/config.py:227-232` |
+| 11 | `load_config` 只把“文件缺失、JSON 错误、校验失败”转成 `ConfigError`。文件不是 UTF-8、`config.json` 是目录、工作区路径是文件、没有读权限时，抛出的是原始的 `UnicodeDecodeError` / `IsADirectoryError` / `NotADirectoryError` / `PermissionError`（前三种实测） | `emerge/config.py:216-221` |
 | 12 | 文档过时：phase-02-models.md:134-201 是旧版“要求 / 完成标准”的重复段落，里面还有 `previous_response_id`、`api_key_env`、`request_timeout`。HANDOFF.md:130（“目前只有 openai”）、:131（`request_timeout`）、:143 和 :146（`model.options.thinking` 的旧位置、旧字段）没有标注已被后来的决策取代。phase-00、phase-01 里还有已被取代的写法：`env.action` / `on_env_action` 和 `RuntimeConfig.max_restarts` 已按 HANDOFF.md:213 删除；`RuntimeConfig.checkpoint` 已按 :261 删除；“从仓库 `workspace/` 复制 6 个文件”已按 :120、:160 改为从 `emerge/workspace_template/` 复制 8 个文件 | 见左列行号 |

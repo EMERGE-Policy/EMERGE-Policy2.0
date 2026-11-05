@@ -7,12 +7,14 @@ reaches it as notifications (see inbox.py).
 
 - System text, built when the session starts and rebuilt only after compaction: prompts/system.md,
   graph.md, tools.md, the workspace's AGENTS.md and USER.md, then prompts/memory.md followed by the
-  global MEMORY.md and this session's MEMORY.md. Edits to those files take effect at the next
-  compaction or in a new session.
+  conversation's MEMORY.md. Edits to those files take effect at the next compaction or in a new
+  session.
+- Everything the agent reads and writes for the conversation (files, memory, runs) is inside the
+  conversation's folder, `storage.session_dir`; only the settings come from the workspace.
 - Runtime info: the current run's summary and whether its graph file holds uncommitted edits,
   appended to the conversation whenever it changed (never put into the system text).
 - Middleware, outermost first: `TurnControl` (so a turn can be interrupted), `StaleCallGuard`,
-  `PromptCacheKey` (OpenAI only), and compaction.
+  `PromptCacheKey`, and compaction.
 - A node's question (`ask_main_agent`) is answered on the side, like Claude Code's /btw: a request
   with the same prefix as the main conversation (system text, tool definitions, the messages done so
   far) plus the question, with tools turned off. It neither waits for nor interrupts the running
@@ -48,6 +50,7 @@ from emerge.config import WorkspaceConfig
 from emerge.events import Event
 from emerge.exceptions import ModelError, RuntimeControlError
 from emerge.graph.registry import NodeRegistry
+from emerge.models.base import ModelProvider
 from emerge.models.client import ModelClient
 from emerge.models.factory import create_client
 from emerge.models.types import Message, ModelRequest, ModelResponse, ToolCall, Usage
@@ -55,7 +58,6 @@ from emerge.runtime.checkpoint import ResumeReport
 from emerge.runtime.feedback import Feedback
 from emerge.runtime.run import ENDED_STATUSES
 from emerge.runtime.service import RuntimeService
-from emerge.storage.artifacts import GLOBAL_SCOPE
 from emerge.storage.base import PendingInput, Storage
 
 if TYPE_CHECKING:
@@ -124,22 +126,23 @@ class StaleCallGuard(AgentMiddleware):
 
 
 class PromptCacheKey(AgentMiddleware):
-    """Sends OpenAI the session's `prompt_cache_key`, so requests sharing a prefix share its cache.
+    """Marks requests with the session's cache key, so requests sharing a prefix share its cache.
 
     Without a key, a request may be served where its prefix was never cached; with one, the main
     conversation and the side requests answering node questions reuse the same cached prefix.
-    Anthropic caches through `cache_control` and takes no such parameter, so it is not given one.
+    Compaction requests have a prefix of their own and are not marked. Each provider decides what
+    the key becomes: OpenAI sends it as `prompt_cache_key`, Anthropic needs no key.
     """
 
-    def __init__(self, key: str) -> None:
+    def __init__(self, key: str | None) -> None:
         self.key = key
 
     async def before_model(self, ctx: RunContext, request: ModelRequest) -> ModelRequest | None:
         return with_cache_key(request, self.key)
 
 
-def with_cache_key(request: ModelRequest, key: str) -> ModelRequest:
-    return request.model_copy(update={"extra": {"prompt_cache_key": key, **request.extra}})
+def with_cache_key(request: ModelRequest, key: str | None) -> ModelRequest:
+    return request.model_copy(update={"cache_key": key})
 
 
 class _Tagged:
@@ -156,9 +159,9 @@ class _Tagged:
         self._target.emit_nowait(dataclasses.replace(event, payload={**event.payload, **self._fields}))
 
     def with_event_defaults(
-        self, *, run_id: str | None = None, node_id: str | None = None, irreversible: bool | None = None
+        self, *, run_id: str | None = None, node_id: str | None = None, acts_on_environment: bool | None = None
     ) -> CallbackView:
-        return self._target.with_event_defaults(run_id=run_id, node_id=node_id, irreversible=irreversible)
+        return self._target.with_event_defaults(run_id=run_id, node_id=node_id, acts_on_environment=acts_on_environment)
 
 
 class _RunEvents:
@@ -175,13 +178,14 @@ class _RunEvents:
         self._target.emit_nowait(dataclasses.replace(event, run_id=self._run_id()))
 
     def with_event_defaults(
-        self, *, run_id: str | None = None, node_id: str | None = None, irreversible: bool | None = None
+        self, *, run_id: str | None = None, node_id: str | None = None, acts_on_environment: bool | None = None
     ) -> CallbackView:
-        return self._target.with_event_defaults(run_id=run_id, node_id=node_id, irreversible=irreversible)
+        return self._target.with_event_defaults(run_id=run_id, node_id=node_id, acts_on_environment=acts_on_environment)
 
 
 class MainAgent:
-    """The main agent of one session at a time. `Session.create` / `Session.open` attach it.
+    """The main agent of one conversation, built on that conversation's storage, runtime and
+    registry; `Session.create` / `Session.open` attach it.
 
     `submit()` and `control()` are what the user does; everything else reaches it from the runtime,
     through `on_feedback` (pass `on_feedback=lambda item: agent.on_feedback(item)` when opening the
@@ -197,18 +201,23 @@ class MainAgent:
         registry: NodeRegistry | None = None,
         *,
         client: ModelClient | None = None,
+        provider: ModelProvider | None = None,
         callbacks: EventEmitter | None = None,
         stream: bool = True,
         extra_tools: Iterable[Tool] = (),
     ) -> None:
+        """Without `client`, a client of the configured model is made, on `provider` when one is given."""
         self.config = config
-        self.workspace = config.workspace
+        # The conversation's folder, where its files, memory and runs live.
+        self.session_dir = storage.session_dir
         self.storage = storage
         self.runtime = runtime
         self.registry = registry if registry is not None else runtime.registry
         # The runtime's manager by default: it already has the one JSONL tracer.
         self.events = _RunEvents(callbacks if callbacks is not None else runtime.callbacks, lambda: self.current_run_id)
-        self.client = client if client is not None else create_client(config, callbacks=self.events)
+        if client is None:
+            client = create_client(config, callbacks=self.events, image_root=self.session_dir, provider=provider)
+        self.client = client
         self.stream = stream
         self.extra_tools = tuple(extra_tools)
         self.session: Session | None = None
@@ -221,8 +230,6 @@ class MainAgent:
         # Set once the latest turn's ending is recorded (status, usage, events).
         self._turn_over: asyncio.Event | None = None
         self._forks: set[asyncio.Task[None]] = set()
-        # Messages taken from the inbox to start a turn, beyond the first, waiting for its first boundary.
-        self._carry: list[Message] = []
         # After a reopen while idle: the note and the run info it was first shown with.
         self._reopen_note: str | None = None
         self._reopen_info: str | None = None
@@ -289,14 +296,14 @@ class MainAgent:
         session.agent = self
         self.inbox = Inbox(session.record.intent_count)
         self.usage = session.record.usage
-        self.memory = MemoryStore(self.storage, self.workspace, session.id)
-        await self.memory.refresh_all()
+        self.memory = MemoryStore(self.storage, self.session_dir)
+        await self.memory.refresh()
         self.skills = SkillStore(self.config.skills_dir)
         self.context = ContextBuilder(
-            self._instructions(session.id), runtime_info=self._runtime_info, system=session.record.system
+            self._instructions(), runtime_info=self._runtime_info, system=session.record.system
         )
         tools = ToolContext(
-            workspace=self.workspace,
+            session_dir=self.session_dir,
             config=self.config,
             storage=self.storage,
             runtime=self.runtime,
@@ -328,14 +335,13 @@ class MainAgent:
             compact_threshold=self.config.agent.compact_threshold,
         )
         # Keyed per session: one conversation, one cached prefix.
-        self._cache_key = session.id if self.client.provider.provider == "openai" else None
-        keyed = [PromptCacheKey(self._cache_key)] if self._cache_key else []
+        self._cache_key = session.id
         self.loop = AgentLoop(
             self.client,
             self.tools,
             self.builder,
             self.history,
-            MiddlewareChain([self.turns, guard, *keyed, compaction]),
+            MiddlewareChain([self.turns, guard, PromptCacheKey(self._cache_key), compaction]),
             RunLimits.from_config(self.config.agent.limits),
             callbacks=self.events,
             stream=self.stream,
@@ -405,15 +411,14 @@ class MainAgent:
             messages = self._admit(self.inbox.take())
             if not messages:
                 continue
-            self._carry = messages[1:]
-            await self._run_turn(messages[0], continued=False)
+            await self._run_turn(messages, continued=False)
 
-    async def _run_turn(self, message: Message, *, continued: bool) -> None:
+    async def _run_turn(self, messages: Message | list[Message], *, continued: bool) -> None:
         session = self._require_session()
-        ctx = RunContext.create(self.workspace, intent_counter=self.inbox.intent, run_id=session.id)
+        ctx = RunContext.create(self.session_dir, intent_counter=self.inbox.intent, run_id=session.id)
         start = self.loop.continue_turn if continued else self.loop.run_turn
         task: asyncio.Task[TurnResult] = asyncio.create_task(
-            start(message, ctx, checkpoint_hook=self._checkpoint), name="main-agent-turn"
+            start(messages, ctx, boundary_hook=self._at_boundary), name="main-agent-turn"
         )
         self.turns.begin(task)
         self._turn_over = over = asyncio.Event()
@@ -422,7 +427,6 @@ class MainAgent:
         self._emit(AGENT_TURN, phase="started", continued=continued)
         await asyncio.wait({task})
         self.turns.end()
-        self._carry = []
         text, error = "", None
         if task.cancelled():
             finish = "cancelled"
@@ -442,15 +446,14 @@ class MainAgent:
         self._emit(AGENT_TURN, phase="finished", finish_reason=finish, error=error, text=text)
         over.set()
 
-    async def _checkpoint(self, ctx: RunContext) -> bool | None:
+    async def _at_boundary(self, ctx: RunContext) -> bool | None:
         """At each boundary: end the turn if interrupted; before a model call, take in the inbox."""
         if self.turns.interrupt_requested:
             return False
         if self._status == "closing" or _awaiting_tool_results(self.history):
             # Between a reply's tool calls and their results nothing else may go into the conversation.
             return None
-        messages = self._carry + self._admit(self.inbox.take())
-        self._carry = []
+        messages = self._admit(self.inbox.take())
         if messages:
             self.history.append_messages_to_current_turn(*messages)
         ctx.intent_counter = self.inbox.intent
@@ -507,7 +510,7 @@ class MainAgent:
         request = self.builder.build()
         messages = _answered(request.messages)
         request = request.model_copy(update={"messages": [*messages, Message.user(text)], "tool_choice": "none"})
-        return with_cache_key(request, self._cache_key) if self._cache_key else request
+        return with_cache_key(request, self._cache_key)
 
     def _describe_node(self, run_id: str, node_id: str) -> str:
         try:
@@ -521,7 +524,7 @@ class MainAgent:
 
     # -- context ---------------------------------------------------------------------------
 
-    def _instructions(self, session_id: str) -> list[Instruction]:
+    def _instructions(self) -> list[Instruction]:
         config = self.config
         return [
             lambda: _prompt("system.md"),
@@ -529,16 +532,13 @@ class MainAgent:
             lambda: _prompt("tools.md"),
             lambda: _contents(config.agents_md, "AGENTS.md", "workspace instructions from the user"),
             lambda: _contents(config.user_md, "USER.md", "about the user"),
-            lambda: self._memory_text(session_id),
+            self._memory_text,
         ]
 
-    def _memory_text(self, session_id: str) -> str:
-        parts = [_prompt("memory.md")]
-        for scope, label in ((GLOBAL_SCOPE, "global memory"), (session_id, "this session's memory")):
-            path = self.memory.path(scope).relative_to(self.workspace).as_posix()
-            text = self.memory.read(scope).strip()
-            parts.append(f"Contents of {path} ({label}):\n\n{text or '(empty)'}")
-        return "\n\n".join(parts)
+    def _memory_text(self) -> str:
+        path = self.memory.path.relative_to(self.session_dir).as_posix()
+        text = self.memory.read().strip()
+        return f"{_prompt('memory.md')}\n\nContents of {path}:\n\n{text or '(empty)'}"
 
     def _runtime_info(self) -> str:
         info = self._run_info()
@@ -560,7 +560,7 @@ class MainAgent:
         lines = ["[Run status, shown again whenever it changes]", self.runtime.summary(run.run_id)]
         if run.status not in ENDED_STATUSES:
             status = self.runtime.graph_file_status(run.run_id)
-            path = Path(status.path).relative_to(self.workspace).as_posix()
+            path = Path(status.path).relative_to(self.session_dir).as_posix()
             if status.has_changes:
                 stale = " It was written from an older graph version: reset_graph, then redo the edits." if status.stale else ""
                 lines.append(f"graph file {path} holds edits not committed yet: commit_graph applies them, reset_graph drops them.{stale}")
@@ -585,7 +585,9 @@ class MainAgent:
         )
 
     def _guarded(self, call: ToolCall) -> bool:
-        return call.name in graph.GUARDED or call.name in execution.GUARDED or files.writes_graph_file(self.workspace, call)
+        if call.name in graph.GUARDED or call.name in execution.GUARDED:
+            return True
+        return files.writes_graph_file(self.session_dir, call)
 
     def _add_usage(self, usage: Usage) -> None:
         self.usage = self.usage + usage

@@ -1,39 +1,41 @@
 import asyncio
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO
 
 from emerge.callbacks.base import CallbackHandler
 from emerge.events import Event, EventType
 
-SESSION_DIR = "_session"
-TRACE_FILE = "trace.jsonl"
-
 
 class JsonlTracer(CallbackHandler):
-    """Appends every event as one JSON line to <runs_dir>/<run_id>/trace.jsonl."""
+    """Appends every event as one JSON line to the file `path_of(event.run_id)` names.
 
-    def __init__(self, runs_dir: Path) -> None:
-        self.runs_dir = Path(runs_dir)
-        self._files: dict[str, TextIO] = {}
+    `path_of` gets the event's run id, or None for an event outside any run; the storage layout
+    decides where each goes (`storage.artifacts.trace_file`).
+    """
+
+    def __init__(self, path_of: Callable[[str | None], Path]) -> None:
+        self.path_of = path_of
+        self._files: dict[str | None, TextIO] = {}
 
     async def on_event(self, event: Event) -> None:
         line = json.dumps(event.to_dict(), ensure_ascii=False)
-        await asyncio.to_thread(self._write, event.run_id or SESSION_DIR, line, event.type == EventType.RUN_FINISHED)
+        await asyncio.to_thread(self._write, event.run_id or None, line, event.type == EventType.RUN_FINISHED)
 
     async def close(self) -> None:
         await asyncio.to_thread(self._close_all)
 
-    def _write(self, key: str, line: str, finished: bool) -> None:
-        file = self._files.get(key)
+    def _write(self, run_id: str | None, line: str, finished: bool) -> None:
+        file = self._files.get(run_id)
         if file is None:
-            path = self.runs_dir / key / TRACE_FILE
+            path = self.path_of(run_id)
             path.parent.mkdir(parents=True, exist_ok=True)
-            file = self._files[key] = path.open("a", encoding="utf-8")
+            file = self._files[run_id] = path.open("a", encoding="utf-8")
         file.write(line + "\n")
         file.flush()
         if finished:
-            self._files.pop(key).close()
+            self._files.pop(run_id).close()
 
     def _close_all(self) -> None:
         for file in self._files.values():

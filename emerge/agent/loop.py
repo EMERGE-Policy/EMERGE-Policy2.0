@@ -2,7 +2,7 @@
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,8 +22,12 @@ FinishReason = Literal[
     "stop", "max_iterations", "max_input_tokens", "max_output_tokens", "max_tool_calls", "cancelled", "closed"
 ]
 
-# Returns False (or awaits a hook that returns False) to end the turn at this boundary.
-CheckpointHook = Callable[[RunContext], Awaitable[bool | None]]
+# Called at each boundary of a turn, i.e. before every model call and before every tool call;
+# returns False (or awaits a hook that returns False) to end the turn there.
+BoundaryHook = Callable[[RunContext], Awaitable[bool | None]]
+
+# What a turn starts or carries on with: one input, or several that enter together.
+TurnInput = str | Message | Sequence[Message]
 
 
 class TurnResult(BaseModel):
@@ -51,7 +55,7 @@ class AgentLoop:
     """Runs one turn at a time over a shared history.
 
     The loop knows nothing about inboxes or control channels: the caller passes a
-    `checkpoint_hook` that may append messages at the end of the history or end the turn early.
+    `boundary_hook` that may append messages at the end of the history or end the turn early.
 
     A turn ends in one of three ways besides finishing: cancelled (the hook returned False, the
     task was cancelled, or a stop was raised), which drops the whole turn; or closed
@@ -84,23 +88,27 @@ class AgentLoop:
 
     async def run_turn(
         self,
-        user_input: str | Message,
+        user_input: TurnInput,
         run_context: RunContext,
         *,
-        checkpoint_hook: CheckpointHook | None = None,
+        boundary_hook: BoundaryHook | None = None,
     ) -> TurnResult:
-        message = Message.user(user_input) if isinstance(user_input, str) else user_input
+        """Start a new turn with `user_input`; several messages all enter it before the first model call."""
+        first, *rest = _messages(user_input)
         turn_index = len(self.history.turns)
-        self.history.start_turn(message)
-        self._emit(EventType.AGENT_MESSAGE, run_context, role="user", text=message.text)
-        return await self._drive(turn_index, run_context, checkpoint_hook)
+        self.history.start_turn(first)
+        if rest:
+            self.history.append_messages_to_current_turn(*rest)
+        for message in (first, *rest):
+            self._emit(EventType.AGENT_MESSAGE, run_context, role="user", text=message.text)
+        return await self._drive(turn_index, run_context, boundary_hook)
 
     async def continue_turn(
         self,
-        user_input: str | Message,
+        user_input: TurnInput,
         run_context: RunContext,
         *,
-        checkpoint_hook: CheckpointHook | None = None,
+        boundary_hook: BoundaryHook | None = None,
     ) -> TurnResult:
         """Append `user_input` to the open (last) turn and carry on with it instead of starting a new one.
 
@@ -108,12 +116,13 @@ class AgentLoop:
         continues from there. Cancelling the continuation drops the whole turn, like any cancellation.
         """
         if not self.history.turns:
-            return await self.run_turn(user_input, run_context, checkpoint_hook=checkpoint_hook)
-        message = Message.user(user_input) if isinstance(user_input, str) else user_input
+            return await self.run_turn(user_input, run_context, boundary_hook=boundary_hook)
+        messages = _messages(user_input)
         turn_index = len(self.history.turns) - 1
-        self.history.append_messages_to_current_turn(message)
-        self._emit(EventType.AGENT_MESSAGE, run_context, role="user", text=message.text)
-        return await self._drive(turn_index, run_context, checkpoint_hook)
+        self.history.append_messages_to_current_turn(*messages)
+        for message in messages:
+            self._emit(EventType.AGENT_MESSAGE, run_context, role="user", text=message.text)
+        return await self._drive(turn_index, run_context, boundary_hook)
 
     def close_turn(self) -> None:
         """End the running turn as `closed`, keeping what it completed.
@@ -126,13 +135,13 @@ class AgentLoop:
         if self._inflight is not None:
             self._inflight.cancel()
 
-    async def _drive(self, turn_index: int, run_context: RunContext, checkpoint_hook: CheckpointHook | None) -> TurnResult:
+    async def _drive(self, turn_index: int, run_context: RunContext, boundary_hook: BoundaryHook | None) -> TurnResult:
         try:
             await self.chain.notify_turn_start(run_context)
             try:
-                result = await self._run(run_context, checkpoint_hook)
+                result = await self._run(run_context, boundary_hook)
             except _Cancelled:
-                # The checkpoint hook ended the turn; the unfinished turn is not written.
+                # The boundary hook ended the turn; the unfinished turn is not written.
                 self.history.truncate_to_turn_count(turn_index)
                 result = TurnResult(usage=run_context.usage, finish_reason="cancelled")
                 await self.chain.notify_turn_end(run_context, result)
@@ -150,14 +159,14 @@ class AgentLoop:
         finally:
             self._closing = False
 
-    async def _run(self, ctx: RunContext, checkpoint_hook: CheckpointHook | None) -> TurnResult:
+    async def _run(self, ctx: RunContext, boundary_hook: BoundaryHook | None) -> TurnResult:
         text = ""
         calls: list[ToolCall] = []
         iterations = 0
         executed = 0
         try:
             while True:
-                await self._checkpoint(checkpoint_hook, ctx)
+                await self._at_boundary(boundary_hook, ctx)
                 if self._closing:
                     raise _Closed
                 reason = self._check_limits(ctx, iterations)
@@ -185,7 +194,7 @@ class AgentLoop:
                         self.history.append_messages_to_current_turn(Message.tool(call.id, "not executed: tool call budget exhausted"))
                         exhausted = True
                         continue
-                    await self._checkpoint(checkpoint_hook, ctx)
+                    await self._at_boundary(boundary_hook, ctx)
                     if self._closing:
                         rest = assistant.tool_calls[index:]
                         self.history.append_messages_to_current_turn(*(Message.tool(c.id, NOT_EXECUTED_CLOSED) for c in rest))
@@ -225,7 +234,7 @@ class AgentLoop:
             return "max_output_tokens"
         return None
 
-    async def _checkpoint(self, hook: CheckpointHook | None, ctx: RunContext) -> None:
+    async def _at_boundary(self, hook: BoundaryHook | None, ctx: RunContext) -> None:
         if hook is not None and await hook(ctx) is False:
             raise _Cancelled
 
@@ -252,3 +261,13 @@ class AgentLoop:
     def _emit(self, type: EventType, ctx: RunContext, **payload: object) -> None:
         if self.callbacks is not None:
             self.callbacks.emit_nowait(Event(type=type, run_id=ctx.run_id, payload=dict(payload)))
+
+
+def _messages(user_input: TurnInput) -> list[Message]:
+    if isinstance(user_input, str):
+        return [Message.user(user_input)]
+    if isinstance(user_input, Message):
+        return [user_input]
+    if not user_input:
+        raise ValueError("a turn needs at least one message")
+    return list(user_input)

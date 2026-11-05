@@ -25,9 +25,12 @@ _OPENAI: dict[str, type[OpenAIResponsesProvider | OpenAIChatCompletionsProvider]
 
 
 def create_provider(
-    model: ModelConfig, provider: OpenAIProviderConfig | AnthropicProviderConfig, workspace: Path | None = None
+    model: ModelConfig, provider: OpenAIProviderConfig | AnthropicProviderConfig, image_root: Path | None = None
 ) -> ModelProvider:
-    """The provider for `model`, built from its entry in `providers` (connection and provider options)."""
+    """The provider for `model`, built from its entry in `providers` (connection and provider options).
+
+    Relative image paths in the messages it sends are read from `image_root`.
+    """
     key = (model.provider, model.api_mode)
     if key not in {("openai", "responses"), ("openai", "chat_completions"), ("anthropic", "anthropic_messages")}:
         raise ModelAPIModeError(f"unsupported provider / api_mode: {model.provider} / {model.api_mode}")
@@ -46,22 +49,34 @@ def create_provider(
         base_url = provider.base_url.rstrip("/").removesuffix("/v1")
         # The Anthropic SDK runs on its own HTTP library (httpx2) and takes only its own Timeout.
         client = AsyncAnthropic(base_url=base_url, api_key=provider.api_key, timeout=AnthropicTimeout(**limits), max_retries=0)
-        return AnthropicMessagesProvider(client, model, provider.options, workspace)
+        return AnthropicMessagesProvider(client, model, provider.options, image_root)
     openai_client = AsyncOpenAI(base_url=provider.base_url, api_key=provider.api_key, timeout=OpenAITimeout(**limits), max_retries=0)
     if model.api_mode == "responses":
-        return OpenAIResponsesProvider(openai_client, model, provider.options, workspace)
+        return OpenAIResponsesProvider(openai_client, model, provider.options, image_root)
     # Chat Completions has no options of its own: the OpenAI ones are for the Responses API.
-    return OpenAIChatCompletionsProvider(openai_client, model, workspace)
+    return OpenAIChatCompletionsProvider(openai_client, model, image_root)
 
 
 def create_client(
-    config: WorkspaceConfig, callbacks: EventEmitter | None = None, limiter: RateLimiter | None = None
+    config: WorkspaceConfig,
+    callbacks: EventEmitter | None = None,
+    limiter: RateLimiter | None = None,
+    *,
+    image_root: Path | None = None,
+    provider: ModelProvider | None = None,
 ) -> ModelClient:
-    provider = config.providers.get(config.model.provider)
+    """The configured model's client.
+
+    Relative image paths are read from `image_root`, the folder of the conversation the client works
+    for. `provider` replaces the one `config.providers` describes, for embedding and tests.
+    """
     if provider is None:
-        raise ConfigError(f"model.provider {config.model.provider!r} has no entry in providers")
+        entry = config.providers.get(config.model.provider)
+        if entry is None:
+            raise ConfigError(f"model.provider {config.model.provider!r} has no entry in providers")
+        provider = create_provider(config.model, entry, image_root)
     return ModelClient(
-        create_provider(config.model, provider, config.workspace),
+        provider,
         model=config.model.name,
         retry=RetryPolicy(max_retries=config.agent.max_retries),
         limiter=limiter,

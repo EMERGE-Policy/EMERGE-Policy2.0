@@ -4,7 +4,7 @@
 
 - Every node runs as its own process, all of them in parallel. A node is an instance of a registered
   type; `list_node_types` and `describe_node_type` show what types exist, their ports, parameters
-  and outcomes, and whether they are irreversible (they act on the environment).
+  and outcomes, and whether they act on the environment.
 - There are two kinds of edges:
   - **Data subscriptions**: an input port reads from another node's output port. The reader sees
     the latest value (and can catch up on recent ones). Subscriptions may form cycles.
@@ -22,7 +22,7 @@
 ## Messages and content
 
 - Port messages carry text, small data and references; the content itself (images, point clouds,
-  files) stays in the workspace and is never moved. A reference names the producing node, its
+  files) stays in this conversation's folder and is never moved. A reference names the producing node, its
   instance, the port and a key.
 - Every message carries its position on the run's single timeline (its content time), stamped by the
   framework: a larger number came later. Use it to tell which of two messages came first.
@@ -108,13 +108,13 @@ Rules the runtime enforces:
 snapshot, latest outputs, artifact directory). `send_to_node` gives a running node a message; what it
 does with it is up to the node.
 
-## Irreversible actions
+## Actions on the environment
 
-Actions on the environment cannot be undone or rolled back. When an irreversible node ends without
-the effect you needed (it finished with a failure outcome, or was stopped before it was done), the
-environment may already be partly changed. First arrange sensing to confirm the scene (a read-only
-node that observes it), then correct forward based on what you observe. Never simply run the same
-action again.
+Actions on the environment cannot be undone or rolled back. When a node that acts on the
+environment ends without the effect you needed (it finished with a failure outcome, or was stopped
+before it was done), the environment may already be partly changed. First arrange sensing to confirm
+the scene (a read-only node that observes it), then correct forward based on what you observe. Never
+simply run the same action again.
 
 ## When the session is reopened
 

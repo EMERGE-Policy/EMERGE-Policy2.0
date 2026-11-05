@@ -235,7 +235,7 @@ class MessageBus:
         record: NodeRuntimeState,
         *,
         previous: LifecycleState | None,
-        irreversible: bool,
+        acts_on_environment: bool,
         current: bool,
     ) -> None:
         """Store an instance's new state; for the current instance, also stamp it and announce it.
@@ -245,7 +245,7 @@ class MessageBus:
         """
         if not current:
             await self._store_state(record)
-            self.emit_stale(record.node_id, record.instance_id, irreversible, "state", state=str(record.state))
+            self.emit_stale(record.node_id, record.instance_id, acts_on_environment, "state", state=str(record.state))
             return
         async with self._timeline:
             content_time = await self.storage.next_content_time(self.run_id)
@@ -254,7 +254,7 @@ class MessageBus:
                 EventType.NODE_STATE,
                 record.node_id,
                 record.instance_id,
-                irreversible,
+                acts_on_environment,
                 content_time,
                 {
                     "state": str(record.state),
@@ -270,7 +270,7 @@ class MessageBus:
         self,
         node_id: str,
         instance_id: str,
-        irreversible: bool,
+        acts_on_environment: bool,
         *,
         text: str | None = None,
         data: Mapping[str, Any] | None = None,
@@ -289,7 +289,7 @@ class MessageBus:
             )
             self._main_seq[instance_id] = seq
             payload = message.model_dump(mode="json")
-            self._emit(EventType.NODE_MAIN_AGENT_MESSAGE, node_id, instance_id, irreversible, content_time, payload)
+            self._emit(EventType.NODE_MAIN_AGENT_MESSAGE, node_id, instance_id, acts_on_environment, content_time, payload)
             wire = {"kind": Kind.MAIN_AGENT_MESSAGE, "message": payload}
             process = self._processes.get(instance_id)
             if process is None:
@@ -311,7 +311,7 @@ class MessageBus:
                 EventType.NODE_ANSWER,
                 process.node_id,
                 process.instance_id,
-                process.irreversible,
+                process.acts_on_environment,
                 content_time,
                 {"ask_id": ask_id, "answer": answer},
             )
@@ -325,14 +325,14 @@ class MessageBus:
                 del self._asks[ask_id]
                 await self.storage.void_ask(ask_id)
 
-    def emit_stale(self, node_id: str, instance_id: str, irreversible: bool, kind: str, **detail: Any) -> None:
+    def emit_stale(self, node_id: str, instance_id: str, acts_on_environment: bool, kind: str, **detail: Any) -> None:
         self.callbacks.emit_nowait(
             Event(
                 type=NODE_STALE,
                 run_id=self.run_id,
                 node_id=node_id,
                 instance_id=instance_id,
-                irreversible=irreversible,
+                acts_on_environment=acts_on_environment,
                 payload={"kind": str(kind), **detail},
             )
         )
@@ -367,7 +367,7 @@ class MessageBus:
             await self.lifecycle.on_node_disconnected(process)
             return
         if not self.is_current(process):
-            self.emit_stale(process.node_id, process.instance_id, process.irreversible, kind, port=message.get("port"))
+            self.emit_stale(process.node_id, process.instance_id, process.acts_on_environment, kind, port=message.get("port"))
             if "req" in message:
                 process.send(reply(message["req"], error="this instance has been replaced and is stopping", stop=True))
             return
@@ -408,7 +408,7 @@ class MessageBus:
                 EventType.PORT_PUBLISHED,
                 process.node_id,
                 process.instance_id,
-                process.irreversible,
+                process.acts_on_environment,
                 content_time,
                 {"port": port, **{key: payload[key] for key in ("version", "text", "data", "refs")}},
             )
@@ -420,7 +420,7 @@ class MessageBus:
                 EventType.NODE_REPORT,
                 process.node_id,
                 process.instance_id,
-                process.irreversible,
+                process.acts_on_environment,
                 content_time,
                 {"text": message["text"]},
             )
@@ -432,7 +432,7 @@ class MessageBus:
             run_id=self.run_id,
             node_id=process.node_id,
             instance_id=process.instance_id,
-            irreversible=process.irreversible,
+            acts_on_environment=process.acts_on_environment,
             content_time=None,
         )
         if event.type != EventType.NODE_CUSTOM:
@@ -452,7 +452,7 @@ class MessageBus:
                 EventType.NODE_ASK,
                 process.node_id,
                 process.instance_id,
-                process.irreversible,
+                process.acts_on_environment,
                 content_time,
                 {"ask_id": record.id, "question": record.question},
             )
@@ -506,7 +506,7 @@ class MessageBus:
         event_type: str,
         node_id: str,
         instance_id: str,
-        irreversible: bool,
+        acts_on_environment: bool,
         content_time: int | None,
         payload: dict[str, Any],
     ) -> None:
@@ -517,7 +517,7 @@ class MessageBus:
                 node_id=node_id,
                 instance_id=instance_id,
                 content_time=content_time,
-                irreversible=irreversible,
+                acts_on_environment=acts_on_environment,
                 payload=payload,
             )
         )

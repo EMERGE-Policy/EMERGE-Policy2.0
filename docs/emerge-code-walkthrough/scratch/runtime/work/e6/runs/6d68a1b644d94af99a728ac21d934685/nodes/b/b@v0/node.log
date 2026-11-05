@@ -1,0 +1,27 @@
+Process emerge-node:b@v0:
+Traceback (most recent call last):
+  File "/data/yuqingchi/miniconda3/envs/EmergePolicy2.0/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/data/yuqingchi/miniconda3/envs/EmergePolicy2.0/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/data/yuqingchi/Code/EMERGE-Policy2.0/emerge/runtime/process.py", line 152, in node_process_main
+    asyncio.run(_serve(conn, NodeLaunch.from_dict(launch)))
+  File "/data/yuqingchi/miniconda3/envs/EmergePolicy2.0/lib/python3.12/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/data/yuqingchi/miniconda3/envs/EmergePolicy2.0/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/yuqingchi/miniconda3/envs/EmergePolicy2.0/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/data/yuqingchi/Code/EMERGE-Policy2.0/emerge/runtime/process.py", line 161, in _serve
+    report = await _run(launch, ctx, channel.send)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/yuqingchi/Code/EMERGE-Policy2.0/emerge/runtime/process.py", line 199, in _run
+    await ctx.aclose()
+  File "/data/yuqingchi/Code/EMERGE-Policy2.0/emerge/runtime/context.py", line 375, in aclose
+    await self._model_client.aclose()
+  File "/data/yuqingchi/Code/EMERGE-Policy2.0/docs/emerge-code-walkthrough/scratch/runtime/wt_nodes.py", line 108, in aclose
+    raise RuntimeError("aclose failed")
+RuntimeError: aclose failed

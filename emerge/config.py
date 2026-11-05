@@ -141,6 +141,9 @@ class WorkspaceConfig(_Section):
             )
         return self
 
+    # The settings every conversation of the workspace shares. Each conversation keeps everything
+    # else in its own folder, `sessions/<session_id>/` (see storage/artifacts.py).
+
     @property
     def workspace(self) -> Path:
         return self._workspace
@@ -158,18 +161,6 @@ class WorkspaceConfig(_Section):
         return self._workspace / "USER.md"
 
     @property
-    def memory_md(self) -> Path:
-        return self._workspace / "memory" / "MEMORY.md"
-
-    @property
-    def code_dir(self) -> Path:
-        return self._workspace / "code"
-
-    @property
-    def runs_dir(self) -> Path:
-        return self._workspace / "runs"
-
-    @property
     def skills_dir(self) -> Path:
         return self._workspace / "skills"
 
@@ -184,15 +175,13 @@ def _format_errors(error: ValidationError) -> str:
 
 DEFAULT_WORKSPACE = Path.home() / ".emerge" / "workspace"
 
-# Files copied from the template on first-run workspace init.
+# Files copied from the template on first-run workspace init: the shared settings. Conversations
+# create their own folders under sessions/ as they start.
 _TEMPLATE_FILES = (
     "config.json",
     "AGENTS.md",
     "USER.md",
-    "memory/MEMORY.md",
-    "code/.gitkeep",
-    "runs/.gitkeep",
-    "skills/recovery-after-irreversible-failure.md",
+    "skills/recovery-after-environment-action-failure.md",
     "skills/sense-before-act.md",
 )
 
@@ -219,6 +208,19 @@ def init_workspace(workspace: Path | None = None) -> bool:
         d.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(s, d)
     return True
+
+
+def api_key_missing(config: WorkspaceConfig) -> bool:
+    """Whether the chosen model provider has no key yet: none, or still the template's placeholder."""
+    entry = config.providers.get(config.model.provider)
+    if entry is None:
+        return True
+    try:
+        template = json.loads((_template_dir() / CONFIG_FILE).read_text(encoding="utf-8"))
+        placeholder = template.get("providers", {}).get(config.model.provider, {}).get("api_key")
+    except (OSError, ValueError):
+        placeholder = None
+    return not entry.api_key.strip() or entry.api_key == placeholder
 
 
 def load_config(workspace: Path | None = None) -> WorkspaceConfig:

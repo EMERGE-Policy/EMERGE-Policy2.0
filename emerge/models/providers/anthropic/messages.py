@@ -54,13 +54,18 @@ class AnthropicMessagesProvider(ModelProvider):
     speeds = {"fast": {"speed": "fast"}}
 
     def __init__(
-        self, client: AsyncAnthropic, model: ModelConfig, provider_options: AnthropicOptions, workspace: Path | None = None
+        self,
+        client: AsyncAnthropic,
+        model: ModelConfig,
+        provider_options: AnthropicOptions,
+        image_root: Path | None = None,
     ) -> None:
         self.client = client
         self.model = model
         # Options only this provider understands, from providers.<name>.options.
         self.provider_options = provider_options
-        self.workspace = workspace
+        # Where relative image paths in messages are read from.
+        self.image_root = image_root
 
     async def _stream_once(self, request: ModelRequest) -> AsyncIterator[StreamEvent]:
         params = await self._build_request_params(request)
@@ -139,6 +144,7 @@ class AnthropicMessagesProvider(ModelProvider):
             "max_tokens": request.max_output_tokens or options.max_output_tokens,
             "messages": messages,
             # Anthropic only caches when asked; automatic caching moves the breakpoint to the end as history grows.
+            # It looks a prefix up by its content, so request.cache_key is not needed and not sent.
             "cache_control": {"type": "ephemeral"},
         }
         if system:
@@ -211,7 +217,7 @@ class AnthropicMessagesProvider(ModelProvider):
     def _block(self, part: TextPart | ImagePart) -> dict[str, Any]:
         if isinstance(part, TextPart):
             return {"type": "text", "text": part.text}
-        media_type, data = read_image(part, self.workspace)
+        media_type, data = read_image(part, self.image_root)
         return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}}
 
     def _matches_provider_and_api_mode(self, item: NativeItem) -> bool:

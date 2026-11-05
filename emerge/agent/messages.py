@@ -11,17 +11,13 @@ conversation elsewhere (the main agent writes it to storage) without the history
 from collections.abc import Sequence
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field
 
 from emerge.models.types import Message, NativeItem
 
 SUMMARY_PREFIX = "[Earlier conversation, compacted]\n\n"
 
 _THINKING_TYPES = frozenset({"thinking", "redacted_thinking"})
-
-
-class _Model(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
 
 class HistoryListener(Protocol):
@@ -38,15 +34,18 @@ class HistoryListener(Protocol):
         """Compaction replaced the history: `summary` is turn 0, `kept` the messages of the turns after it."""
 
 
-class Turn(_Model):
+class Turn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     messages: list[Message] = Field(default_factory=list)
     # Set on the single turn that replaces earlier turns after compaction.
     summary: bool = False
 
 
-class History(_Model):
-    turns: list[Turn] = Field(default_factory=list)
-    _listener: HistoryListener | None = PrivateAttr(default=None)
+class History:
+    def __init__(self) -> None:
+        self.turns: list[Turn] = []
+        self._listener: HistoryListener | None = None
 
     def __len__(self) -> int:
         return len(self.turns)

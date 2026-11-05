@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from emerge.agent.control import ControlAction, Controller, ControlResult, TurnControl
     from emerge.agent.inbox import Inbox, InboxItem, InboxKind
     from emerge.agent.memory import MemoryImage, MemoryResult, MemoryStore, split_entries
-    from emerge.agent.session import Session
+    from emerge.agent.session import Session, delete_session, list_sessions
 
 # The main agent pulls in the runtime, storage and graph packages. The modules above are shared with
 # agent nodes and must not, so the main agent's names load only when first used.
@@ -39,7 +39,7 @@ _MAIN_AGENT = {
     "emerge.agent.control": ("ControlAction", "ControlResult", "Controller", "TurnControl"),
     "emerge.agent.inbox": ("Inbox", "InboxItem", "InboxKind"),
     "emerge.agent.memory": ("MemoryImage", "MemoryResult", "MemoryStore", "split_entries"),
-    "emerge.agent.session": ("Session",),
+    "emerge.agent.session": ("Session", "delete_session", "list_sessions"),
 }
 _LAZY = {name: module for module, names in _MAIN_AGENT.items() for name in names}
 
@@ -92,7 +92,9 @@ __all__ = [
     "TurnControl",
     "TurnResult",
     "call_model",
+    "delete_session",
     "error_result",
+    "list_sessions",
     "split_entries",
     "tool",
 ]

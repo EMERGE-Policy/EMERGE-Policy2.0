@@ -186,7 +186,7 @@ class FeedbackHandler(CallbackHandler):
         node.outcome, node.reason, node.error = payload.get("outcome"), str(payload.get("reason") or ""), payload.get("error")
         if state in _ENDED:
             self._drop_asks(view, event.instance_id)
-            text = _ended_text(node_id, node, bool(event.irreversible))
+            text = _ended_text(node_id, node, bool(event.acts_on_environment))
             view.recent.append(text)
             data = {key: payload.get(key) for key in ("state", "outcome", "reason", "error")}
             await self._push(view, Feedback(run_id=event.run_id, kind="node_ended", node_id=node_id, text=text, data=data))
@@ -278,8 +278,8 @@ class FeedbackHandler(CallbackHandler):
                 await result
 
 
-def _ended_text(node_id: str, node: _NodeView, irreversible: bool) -> str:
-    mark = " [irreversible]" if irreversible else ""
+def _ended_text(node_id: str, node: _NodeView, acts_on_environment: bool) -> str:
+    mark = " [acts on environment]" if acts_on_environment else ""
     if node.state == "finished":
         reason = f" ({node.reason})" if node.reason else ""
         return f"{node_id}{mark} finished: {node.outcome}{reason}"

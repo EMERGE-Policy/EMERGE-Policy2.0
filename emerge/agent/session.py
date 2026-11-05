@@ -1,5 +1,9 @@
 """A conversation with the main agent: written down as it happens, closed and opened again later.
 
+A conversation keeps everything it has in its own folder, `sessions/<session_id>/` (see
+storage/artifacts.py): its database, its memory, its generated code and its runs. Listing and
+deleting conversations works on those folders.
+
 This serves one case: the user leaves in the middle and later opens the same session to go on. A
 run paused before leaving is the same case. Everything needed is stored when it happens:
 
@@ -29,15 +33,26 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from emerge.agent.messages import History, Turn
 from emerge.exceptions import StorageError
 from emerge.models.types import Message, Usage
 from emerge.runtime.run import ENDED_STATUSES
-from emerge.storage.base import PendingInput, SessionRecord, SessionStatus, Storage, StoredMessage
+from emerge.storage.artifacts import session_dir, sessions_dir
+from emerge.storage.base import (
+    PendingInput,
+    SessionRecord,
+    SessionStatus,
+    SessionSummary,
+    Storage,
+    StoredMessage,
+    read_session,
+)
 
 if TYPE_CHECKING:
     from emerge.agent.agent import MainAgent
@@ -50,8 +65,9 @@ Write = Callable[[], Awaitable[Any]]
 class Session:
     """One conversation: its record, its history, its runs, and the queue its writes go through.
 
-    Create one with `Session.create(agent)` or open a stored one with `Session.open(agent, id)`;
-    the agent serves it until `close()`.
+    The main agent serving it is built on the conversation's storage. Create one with
+    `Session.create(agent, session_id)` on a new folder, or open the one stored in the agent's
+    storage with `Session.open(agent)`; the agent serves it until `close()`.
     """
 
     def __init__(self, storage: Storage, record: SessionRecord, history: History) -> None:
@@ -77,32 +93,28 @@ class Session:
     # -- opening and closing ------------------------------------------------------
 
     @classmethod
-    async def create(cls, agent: MainAgent, *, title: str = "") -> Session:
+    async def create(cls, agent: MainAgent, session_id: str, *, title: str = "") -> Session:
         """A new conversation, served by `agent` from now on."""
-        record = await agent.storage.create_session(title=title)
+        record = await agent.storage.create_session(session_id, title=title)
         session = cls(agent.storage, record, History())
         await agent.attach(session)
         await agent.start()
         return session
 
     @classmethod
-    async def open(cls, agent: MainAgent, session_id: str) -> Session:
-        """Open a stored conversation and go on where it was left; closed runs carry on, unasked."""
+    async def open(cls, agent: MainAgent) -> Session:
+        """Open the conversation in the agent's storage and go on where it was left; closed runs carry on, unasked."""
         storage = agent.storage
-        record = await storage.get_session(session_id)
+        record = await storage.get_session()
         if record is None:
-            raise StorageError(f"no session {session_id!r}")
-        session = cls(storage, record, history_from_rows(await storage.load_messages(session_id)))
+            raise StorageError(f"no session in {storage.session_dir}")
+        session = cls(storage, record, history_from_rows(await storage.load_messages()))
         await agent.attach(session)
-        reports = [
-            await agent.runtime.resume_run(run.id)
-            for run in await storage.runs_of_session(session_id)
-            if run.status == "closed"
-        ]
+        reports = [await agent.runtime.resume_run(run.id) for run in await storage.runs() if run.status == "closed"]
         await agent.start(
             reports=reports,
             unfinished_turn=record.status == "turn_open",
-            pending=await storage.pending_inputs(session_id),
+            pending=await storage.pending_inputs(),
         )
         return session
 
@@ -114,23 +126,13 @@ class Session:
         if agent is not None:
             await agent.detach()
             for run in agent.runtime.runs():
-                if run.session_id == self.id and run.status not in ENDED_STATUSES:
+                if run.status not in ENDED_STATUSES:
                     await agent.runtime.close_run(run.run_id)
         await self.flush()
         if self._writer is not None:
             self._writer.cancel()
             await asyncio.gather(self._writer, return_exceptions=True)
             self._writer = None
-
-    @staticmethod
-    async def list(storage: Storage, *, limit: int | None = None) -> tuple[SessionRecord, ...]:
-        """Stored sessions, most recently updated first (what `/sessions` shows)."""
-        return await storage.list_sessions(limit=limit)
-
-    @staticmethod
-    async def delete(storage: Storage, session_id: str) -> None:
-        """Delete a closed session, with its conversation and its own memory; global memory stays."""
-        await storage.delete_session(session_id)
 
     # -- what the conversation writes (HistoryListener) ---------------------------
 
@@ -143,19 +145,19 @@ class Session:
 
     def turns_dropped(self, start: int, stop: int) -> None:
         for turn in range(start, stop):
-            self._queue(partial(self.storage.discard_turn, self.id, turn))
+            self._queue(partial(self.storage.discard_turn, turn))
 
     def compacted(self, summary: Message, kept: Sequence[tuple[int, Message]]) -> None:
-        self._queue(partial(self.storage.compact_messages, self.id, summary, list(kept)))
+        self._queue(partial(self.storage.compact_messages, summary, list(kept)))
         if self.system_source is not None:
             source = self.system_source
-            self._queue(lambda: self.storage.set_system_snapshot(self.id, source()))
+            self._queue(lambda: self.storage.set_system_snapshot(source()))
 
     # -- other writes -----------------------------------------------------------------
 
     async def add_pending(self, message: Message) -> PendingInput:
         """Keep a user message the moment it arrives; it is removed once it is in the conversation."""
-        return await self.storage.add_pending_input(self.id, message)
+        return await self.storage.add_pending_input(message)
 
     def hold_pending(self, message: Message, seq: int) -> None:
         """`message` came from `pending_inputs` row `seq`: delete that row once the message is written."""
@@ -164,16 +166,16 @@ class Session:
     def set_status(self, status: SessionStatus) -> None:
         if status != self.status:
             self.status = status
-            self._queue(partial(self.storage.update_session, self.id, status=status))
+            self._queue(partial(self.storage.update_session, status=status))
 
     def set_intent(self, count: int) -> None:
-        self._queue(partial(self.storage.update_session, self.id, intent_count=count))
+        self._queue(partial(self.storage.update_session, intent_count=count))
 
     def set_usage(self, usage: Usage) -> None:
-        self._queue(partial(self.storage.update_session, self.id, usage=usage))
+        self._queue(partial(self.storage.update_session, usage=usage))
 
     def save_system(self, system: str) -> None:
-        self._queue(partial(self.storage.set_system_snapshot, self.id, system))
+        self._queue(partial(self.storage.set_system_snapshot, system))
 
     async def flush(self) -> None:
         """Wait until every queued write is in the database."""
@@ -183,11 +185,11 @@ class Session:
     # -- the write queue --------------------------------------------------------------
 
     def _append(self, turn: int, message: Message) -> None:
-        self._queue(partial(self.storage.append_message, self.id, turn, message))
+        self._queue(partial(self.storage.append_message, turn, message))
         seq = self._pending.pop(id(message), None)
         if seq is not None:
             # After the message itself: the queue keeps order, so it is never in neither place.
-            self._queue(partial(self.storage.remove_pending_input, self.id, seq))
+            self._queue(partial(self.storage.remove_pending_input, seq))
 
     def _queue(self, write: Write) -> None:
         if self._writer is None:
@@ -215,3 +217,25 @@ def history_from_rows(rows: Sequence[StoredMessage]) -> History:
             turn = row.turn
         history.turns[-1].messages.append(row.message)
     return history
+
+
+async def list_sessions(workspace: Path, *, limit: int | None = None) -> tuple[SessionSummary, ...]:
+    """The conversations of `workspace`, most recently updated first (what `/sessions` shows)."""
+    directory = sessions_dir(workspace)
+    folders = sorted(path for path in directory.iterdir() if path.is_dir()) if directory.is_dir() else []
+    summaries = [summary for folder in folders if (summary := await read_session(folder)) is not None]
+    summaries.sort(key=lambda summary: (summary.session.updated_at, summary.session.id), reverse=True)
+    return tuple(summaries if limit is None else summaries[:limit])
+
+
+async def delete_session(workspace: Path, session_id: str) -> None:
+    """Delete a conversation with everything it has: its whole folder. Refused while a run of it is open."""
+    folder = session_dir(workspace, session_id)
+    summary = await read_session(folder)
+    if summary is None:
+        raise StorageError(f"no session {session_id!r} in {workspace}")
+    busy = [run for run in summary.runs if run.status not in ENDED_STATUSES]
+    if busy:
+        listed = ", ".join(f"{run.id} ({run.status})" for run in busy)
+        raise StorageError(f"session {session_id!r} still has open runs: {listed}")
+    shutil.rmtree(folder)

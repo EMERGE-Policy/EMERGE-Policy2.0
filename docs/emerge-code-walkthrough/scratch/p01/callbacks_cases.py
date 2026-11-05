@@ -67,7 +67,7 @@ async def main():
     m.emit_nowait(shared)
     # view
     v = m.with_event_defaults(run_id="r1", node_id="n1")
-    v2 = v.with_event_defaults(node_id="n2", irreversible=True)
+    v2 = v.with_event_defaults(node_id="n2", acts_on_environment=True)
     v3 = v2.with_event_defaults(node_id=None)
     v.emit_nowait(Event(type="view1"))
     v2.emit_nowait(Event(type="view2", run_id="explicit"))
@@ -81,7 +81,7 @@ async def main():
     print("r2 shared same object:", any(e is shared for e in r2.got), "slow same object:", any(e is shared for e in slow.got))
     for e in r2.got:
         if e.type.startswith("view"):
-            print("  ", e.type, e.run_id, e.node_id, e.irreversible)
+            print("  ", e.type, e.run_id, e.node_id, e.acts_on_environment)
     print("orig untouched:", e_orig.run_id, e_orig.node_id)
     m.emit_nowait(Event(type="after-close"))
     await m.aclose()

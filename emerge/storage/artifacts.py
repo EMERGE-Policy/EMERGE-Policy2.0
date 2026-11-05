@@ -1,20 +1,23 @@
 """Where things live in a workspace, and how the complex values are written down.
 
-Every path here is derived from the workspace root, and every path the code agrees to hand out is
-workspace-relative, so moving the workspace does not invalidate a stored reference. The layout is
-the contract other packages rely on:
+A workspace holds the settings every conversation shares, and one folder per conversation holding
+everything that conversation has. The layout is the contract other packages rely on:
 
-    runs/<run_id>/                                a run's root, with trace.jsonl
-    runs/<run_id>/graph.json                      the main agent's draft of the graph
-    runs/<run_id>/nodes/<node_id>/<instance_id>/  one node instance's artifacts
-    runs/<run_id>/nodes/<node_id>/<instance_id>/<port>/<key>/   what one `Ref` points at
-    code/<node_name>/v<version>.py                generated node code
-    memory/MEMORY.md, memory/asset/               global memory
-    sessions/<session_id>/memory/MEMORY.md, ...   one session's memory
-    .emerge/state.db                              the database
+    config.json, AGENTS.md, USER.md, skills/        the settings, shared by every conversation
+    sessions/<session_id>/                           one conversation, all of it:
+        .emerge/state.db                                 its database
+        trace.jsonl                                      its events outside any run
+        memory/MEMORY.md, memory/asset/                  its memory
+        code/<node_name>/v<version>.py                   node code generated in it
+        runs/<run_id>/                                   a run's root, with trace.jsonl
+        runs/<run_id>/graph.json                         the main agent's draft of the graph
+        runs/<run_id>/nodes/<node_id>/<instance_id>/     one node instance's artifacts
+        runs/<run_id>/nodes/<node_id>/<instance_id>/<port>/<key>/   what one `Ref` points at
 
-How the files under a ref directory are arranged is the node's business; this module stops at the
-key directory.
+Every path inside a conversation is derived from its folder, and every path the code hands out there
+is relative to that folder, so moving a workspace or a conversation does not invalidate a stored
+reference. How the files under a ref directory are arranged is the node's business; this module
+stops at the key directory.
 """
 
 from __future__ import annotations
@@ -22,101 +25,109 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from emerge.graph.ports import Ref
 
-GLOBAL_SCOPE = "global"
-
 _STATE_DIR = ".emerge"
 _DB_NAME = "state.db"
+_TRACE_FILE = "trace.jsonl"
 _CODE_VERSION = re.compile(r"^v?(\d+)$")
 
 
-# -- paths ------------------------------------------------------------------
+# -- the workspace ----------------------------------------------------------
 
 
-def state_db_path(workspace: Path) -> Path:
-    return workspace / _STATE_DIR / _DB_NAME
+def sessions_dir(workspace: Path) -> Path:
+    return workspace / "sessions"
 
 
-def runs_dir(workspace: Path) -> Path:
-    return workspace / "runs"
+def session_dir(workspace: Path, session_id: str) -> Path:
+    """The folder of one conversation, which holds everything it has."""
+    if not session_id or any(char in session_id for char in "/\\") or session_id in (".", ".."):
+        raise ValueError(f"session id {session_id!r} cannot name a folder")
+    return sessions_dir(workspace) / session_id
 
 
-def run_dir(workspace: Path, run_id: str) -> Path:
-    return runs_dir(workspace) / run_id
+# -- inside a conversation --------------------------------------------------
 
 
-def graph_file(workspace: Path, run_id: str) -> Path:
-    return run_dir(workspace, run_id) / "graph.json"
+def state_db_path(session_dir: Path) -> Path:
+    return session_dir / _STATE_DIR / _DB_NAME
 
 
-def node_dir(workspace: Path, run_id: str, node_id: str, instance_id: str) -> Path:
-    return run_dir(workspace, run_id) / "nodes" / node_id / instance_id
+def trace_file(session_dir: Path, run_id: str | None) -> Path:
+    """Where the events of one run go, or, without a run, the conversation's other events."""
+    return (run_dir(session_dir, run_id) if run_id is not None else session_dir) / _TRACE_FILE
 
 
-def ref_dir(workspace: Path, run_id: str, ref: Ref) -> Path:
+def runs_dir(session_dir: Path) -> Path:
+    return session_dir / "runs"
+
+
+def run_dir(session_dir: Path, run_id: str) -> Path:
+    return runs_dir(session_dir) / run_id
+
+
+def graph_file(session_dir: Path, run_id: str) -> Path:
+    return run_dir(session_dir, run_id) / "graph.json"
+
+
+def node_dir(session_dir: Path, run_id: str, node_id: str, instance_id: str) -> Path:
+    return run_dir(session_dir, run_id) / "nodes" / node_id / instance_id
+
+
+def ref_dir(session_dir: Path, run_id: str, ref: Ref) -> Path:
     """The directory behind one reference.
 
     The instance is part of the path, so an instance that replaced another writes the same key
     somewhere else and the two never overwrite each other.
     """
-    return node_dir(workspace, run_id, ref.producer, ref.producer_instance) / ref.port / ref.key
+    return node_dir(session_dir, run_id, ref.producer, ref.producer_instance) / ref.port / ref.key
 
 
-def memory_dir(workspace: Path, scope: str) -> Path:
-    """Where one memory scope keeps its file and images; scope is "global" or a session id."""
-    if scope == GLOBAL_SCOPE:
-        return workspace / "memory"
-    return workspace / "sessions" / scope / "memory"
+def memory_dir(session_dir: Path) -> Path:
+    """Where the conversation's memory keeps its file and images."""
+    return session_dir / "memory"
 
 
-def memory_file(workspace: Path, scope: str) -> Path:
-    return memory_dir(workspace, scope) / "MEMORY.md"
+def memory_file(session_dir: Path) -> Path:
+    return memory_dir(session_dir) / "MEMORY.md"
 
 
-def memory_asset_dir(workspace: Path, scope: str) -> Path:
-    return memory_dir(workspace, scope) / "asset"
+def memory_asset_dir(session_dir: Path) -> Path:
+    return memory_dir(session_dir) / "asset"
 
 
-def code_path(workspace: Path, name: str, version: str) -> Path:
-    return workspace / "code" / name / f"v{_version_number(version)}.py"
+def code_dir(session_dir: Path) -> Path:
+    return session_dir / "code"
 
 
-def ensure_run_dir(workspace: Path, run_id: str) -> Path:
-    directory = run_dir(workspace, run_id)
+def code_path(session_dir: Path, name: str, version: str) -> Path:
+    return code_dir(session_dir) / name / f"v{_version_number(version)}.py"
+
+
+def ensure_run_dir(session_dir: Path, run_id: str) -> Path:
+    directory = run_dir(session_dir, run_id)
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
 
-def ensure_node_dir(workspace: Path, run_id: str, node_id: str, instance_id: str) -> Path:
-    directory = node_dir(workspace, run_id, node_id, instance_id)
+def ensure_node_dir(session_dir: Path, run_id: str, node_id: str, instance_id: str) -> Path:
+    directory = node_dir(session_dir, run_id, node_id, instance_id)
     directory.mkdir(parents=True, exist_ok=True)
     return directory
-
-
-def ensure_memory_dir(workspace: Path, scope: str) -> Path:
-    directory = memory_dir(workspace, scope)
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory
-
-
-def remove_session_memory(workspace: Path, session_id: str) -> None:
-    """Delete one session's memory file and images; the rest of the session directory is untouched."""
-    shutil.rmtree(workspace / "sessions" / session_id, ignore_errors=True)
 
 
 # -- memory images ----------------------------------------------------------
 
 
-def copy_memory_asset(workspace: Path, scope: str, source: Path | str) -> str:
-    """Copy an image into one scope's memory directory and return its workspace-relative path.
+def copy_memory_asset(session_dir: Path, source: Path | str) -> str:
+    """Copy an image into the memory's asset folder and return its path relative to the conversation.
 
     The file is named by the hash of its content, so copying the same image twice leaves one file.
     Copying rather than pointing at the original: a node may overwrite the file it produced, and
@@ -125,36 +136,44 @@ def copy_memory_asset(workspace: Path, scope: str, source: Path | str) -> str:
     src = Path(source)
     data = src.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
-    directory = memory_asset_dir(workspace, scope)
+    directory = memory_asset_dir(session_dir)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{digest}{src.suffix.lower()}"
     if not target.exists():
         target.write_bytes(data)
-    return target.relative_to(workspace).as_posix()
+    return target.relative_to(session_dir).as_posix()
 
 
 # -- generated code ---------------------------------------------------------
 
 
-def write_generated_code(workspace: Path, name: str, version: str, source: str) -> Path:
+def write_generated_code(session_dir: Path, name: str, version: str, source: str) -> Path:
     """Write one version of a generated node type, replacing that version's file if it exists."""
-    path = code_path(workspace, name, version)
+    path = code_path(session_dir, name, version)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
     return path
 
 
-def read_generated_code(workspace: Path, name: str, version: str) -> str:
-    return code_path(workspace, name, version).read_text(encoding="utf-8")
+def read_generated_code(session_dir: Path, name: str, version: str) -> str:
+    return code_path(session_dir, name, version).read_text(encoding="utf-8")
 
 
-def list_generated_versions(workspace: Path, name: str) -> tuple[str, ...]:
+def list_generated_names(session_dir: Path) -> tuple[str, ...]:
+    """The generated node types of the conversation, by name."""
+    directory = code_dir(session_dir)
+    if not directory.is_dir():
+        return ()
+    return tuple(sorted(path.name for path in directory.iterdir() if path.is_dir()))
+
+
+def list_generated_versions(session_dir: Path, name: str) -> tuple[str, ...]:
     """Every written version of one generated node type, oldest first.
 
     Numeric versions sort numerically, so v10 comes after v9; anything else sorts after the
     numbers, as text.
     """
-    directory = workspace / "code" / name
+    directory = code_dir(session_dir) / name
     if not directory.is_dir():
         return ()
     numbers: list[int] = []
@@ -194,5 +213,8 @@ def dump_model(model: BaseModel) -> str:
     return dump_json(model.model_dump(mode="json"))
 
 
-def load_model[T: BaseModel](model: type[T], text: str) -> T:
+_Model = TypeVar("_Model", bound=BaseModel)
+
+
+def load_model(model: type[_Model], text: str) -> _Model:
     return model.model_validate_json(text)

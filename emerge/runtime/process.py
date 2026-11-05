@@ -51,7 +51,9 @@ class NodeLaunch:
     # Every declared input -> {"source": "node.port" | None, "closed": bool, "start": int | None} at
     # launch; later changes arrive as INPUT messages.
     inputs: dict[str, dict[str, Any]]
+    # The workspace, and the folder of the conversation the run belongs to.
     workspace: str
+    session_dir: str
     # WorkspaceConfig.model_dump(mode="json"); the workspace path travels separately, as above.
     config: dict[str, Any]
     port_buffer: int
@@ -70,11 +72,11 @@ class NodeLaunch:
 class NodeProcess:
     """The main process's handle on one node process."""
 
-    def __init__(self, launch: NodeLaunch, *, irreversible: bool) -> None:
+    def __init__(self, launch: NodeLaunch, *, acts_on_environment: bool) -> None:
         self.launch = launch
         self.node_id = launch.node_id
         self.instance_id = launch.instance_id
-        self.irreversible = irreversible
+        self.acts_on_environment = acts_on_environment
         # Set by the supervisor. Once a stop was requested the instance ends stopped whatever run()
         # does; `forced` means the stop timed out and the process was killed.
         self.stop_requested = False

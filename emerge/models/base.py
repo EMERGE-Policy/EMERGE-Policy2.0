@@ -177,11 +177,11 @@ def speed_params(provider: ModelProvider, speed: Speed) -> dict[str, Any]:
     return provider.speeds[speed]
 
 
-def read_image(image: ImagePart, workspace: Path | None) -> tuple[str, str]:
-    """Return (media_type, base64 data) for an image path."""
+def read_image(image: ImagePart, image_root: Path | None) -> tuple[str, str]:
+    """Return (media_type, base64 data) for an image path; a relative path is read from `image_root`."""
     path = Path(image.path).expanduser()
-    if not path.is_absolute() and workspace is not None:
-        path = workspace / path
+    if not path.is_absolute() and image_root is not None:
+        path = image_root / path
     try:
         data = path.read_bytes()
     except OSError as e:
@@ -190,8 +190,8 @@ def read_image(image: ImagePart, workspace: Path | None) -> tuple[str, str]:
     return mime, base64.b64encode(data).decode("ascii")
 
 
-def image_data_url(image: ImagePart, workspace: Path | None) -> str:
-    mime, data = read_image(image, workspace)
+def image_data_url(image: ImagePart, image_root: Path | None) -> str:
+    mime, data = read_image(image, image_root)
     return f"data:{mime};base64,{data}"
 
 

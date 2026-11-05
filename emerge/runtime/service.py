@@ -1,15 +1,17 @@
 """`RuntimeService`: the one way into the runtime for the main agent's tools, the TUI and headless use.
 
-It holds the runs open in this process, each with its own supervisor, and the callback handlers
-shared by all of them: the JSONL tracer (once per callback manager, every event of every run,
-model tokens included), the feedback handler that reaches the main agent, and the stream handler
-outside callers subscribe to. Explicit pause and stop requests are carried out directly; no model
-decides on them.
+One service serves one conversation: its storage is the conversation's, and everything its runs
+produce goes under the conversation's folder. It holds the runs open in this process, each with its
+own supervisor, and the callback handlers shared by all of them: the JSONL tracer (once per callback
+manager, every event of every run, model tokens included), the feedback handler that reaches the
+main agent, and the stream handler outside callers subscribe to. Explicit pause and stop requests
+are carried out directly; no model decides on them.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from functools import partial
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -32,7 +34,7 @@ from emerge.runtime.run import Run, RunHandle, create_run
 from emerge.runtime.state import NodeRuntimeState
 from emerge.runtime.stream import StreamHandler, Subscription
 from emerge.runtime.supervisor import Supervisor
-from emerge.storage.artifacts import node_dir, runs_dir
+from emerge.storage.artifacts import node_dir, trace_file
 from emerge.storage.base import AskRecord, RunRecord, Storage
 
 
@@ -49,7 +51,7 @@ class NodeView(BaseModel):
     outcome: str | None = None
     reason: str = ""
     error: str | None = None
-    irreversible: bool = False
+    acts_on_environment: bool = False
 
 
 class RunStatusReport(BaseModel):
@@ -71,7 +73,7 @@ class NodeDetail(BaseModel):
     snapshot: Any = None
     # Output port -> the newest message on it.
     outputs: dict[str, Message] = {}
-    # runs/<run_id>/nodes/<node_id>/<instance_id>/, relative to the workspace.
+    # runs/<run_id>/nodes/<node_id>/<instance_id>/, relative to the conversation's folder.
     artifacts_dir: str
     # Earlier instances of the node, oldest first, and how each one ended.
     replacements: tuple[Replacement, ...] = ()
@@ -110,14 +112,14 @@ class RuntimeService:
     ) -> None:
         self.storage = storage
         self.config = config
-        self.workspace = config.workspace
+        self.session_dir = storage.session_dir
         self.registry = registry if registry is not None else get_active_registry()
         self.policy = policy
         self._owns_callbacks = callbacks is None
         self.callbacks = callbacks if callbacks is not None else CallbackManager()
         # One tracer per callback manager: it already writes every run's events to its own file.
         # A caller sharing a manager that has one passes trace=False.
-        self.tracer = JsonlTracer(runs_dir(self.workspace)) if trace else None
+        self.tracer = JsonlTracer(partial(trace_file, self.session_dir)) if trace else None
         self.feedback = FeedbackHandler(on_feedback, interval=feedback_interval, max_chars=summary_chars)
         self.streams = StreamHandler(self._values)
         self._runs: dict[str, RunHandle] = {}
@@ -151,13 +153,13 @@ class RuntimeService:
 
     # -- runs -----------------------------------------------------------------
 
-    async def start_run(self, graph: Graph, session_id: str) -> Run:
+    async def start_run(self, graph: Graph) -> Run:
         """Create a run and start `graph`, which may be empty: the main agent then draws it in the file."""
-        record = await create_run(self.storage, self.workspace, session_id)
+        record = await create_run(self.storage)
         handle = self._make_handle(record)
         self._runs[record.id] = handle
         await self.storage.save_graph(record.id, graph)
-        handle.emit(EventType.RUN_STARTED, {"session_id": session_id, "graph_version": graph.version})
+        handle.emit(EventType.RUN_STARTED, {"graph_version": graph.version})
         await handle.supervisor.start(graph, record.id)
         await mutations.write_graph_file(handle, force=True)
         await handle.refresh_status()
@@ -292,14 +294,14 @@ class RuntimeService:
             for record in await self.storage.latest_port_messages(run_id)
             if record.node == node_id
         }
-        directory = node_dir(self.workspace, run_id, node_id, spec.instance_id)
+        directory = node_dir(self.session_dir, run_id, node_id, spec.instance_id)
         return NodeDetail(
             node=self._node_view(handle, node_id),
             params=thaw(spec.params),
             code=spec.code,
             snapshot=await self.storage.node_snapshot(run_id, node_id, spec.instance_id),
             outputs=outputs,
-            artifacts_dir=str(directory.relative_to(self.workspace)),
+            artifacts_dir=directory.relative_to(self.session_dir).as_posix(),
             replacements=handle.graph.replacements_of(node_id),
             instances=tuple(r for r in handle.supervisor.instance_states() if r.node_id == node_id),
             pending_asks=tuple(ask for ask in await self.storage.pending_asks(run_id) if ask.node_id == node_id),
@@ -318,7 +320,7 @@ class RuntimeService:
 
     def _make_handle(self, record: RunRecord) -> RunHandle:
         supervisor = Supervisor(self.storage, self.callbacks, self.config, self.registry, policy=self.policy)
-        return RunHandle(record, supervisor, self.storage, self.callbacks, self.workspace)
+        return RunHandle(record, supervisor, self.storage, self.callbacks)
 
     def _handle(self, run_id: str) -> RunHandle:
         handle = self._runs.get(run_id)
@@ -354,7 +356,7 @@ class RuntimeService:
             outcome=record.outcome if record is not None else None,
             reason=record.reason if record is not None else "",
             error=record.error if record is not None else None,
-            irreversible=entry is not None and entry.irreversible,
+            acts_on_environment=entry is not None and entry.acts_on_environment,
         )
 
     async def _values(self, run_id: str) -> dict[str, Any]:

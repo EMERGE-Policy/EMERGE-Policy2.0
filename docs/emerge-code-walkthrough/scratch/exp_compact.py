@@ -121,14 +121,14 @@ async def main():
     print("listener calls after compaction:", [c for c in lst.calls if c[0] != "compacted"][-2:])
     print("stale measured pair:", comp.compactor._measured, "(sent messages now:", len(RequestBuilder(ctxb, h, []).build().messages), ")")
 
-    print("=== checkpoint returns False before a tool, after compaction in the same turn")
+    print("=== boundary hook returns False before a tool, after compaction in the same turn")
     loop, p, h, comp, ctxb, parts = make([reply("", [("c1", "fast", {"x": 1})])], max_ctx=1000)
     seed(h, 4)
     n = {"n": 0}
     async def hook(c):
         n["n"] += 1
         return False if n["n"] == 2 else None
-    r = await loop.run_turn("q", RunContext.create(Path(".")), checkpoint_hook=hook)
+    r = await loop.run_turn("q", RunContext.create(Path(".")), boundary_hook=hook)
     print("result:", r.finish_reason, dump_history(h))
 
     print("=== runtime info unchanged, compaction in iteration 1 → appended again in iteration 2")

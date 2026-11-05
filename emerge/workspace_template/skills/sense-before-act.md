@@ -1,15 +1,15 @@
 ---
 name: sense-before-act
-description: Use before executing any irreversible action; describes how to add a sensing step to confirm the environment state first.
+description: Use before running any node that acts on the environment; describes how to add a sensing step to confirm the environment state first.
 ---
 
 # Sense before you act
 
-An irreversible action cannot be undone, so the state it acts on must be known at the moment it
+An action on the environment cannot be undone, so the state it acts on must be known at the moment it
 runs. The state you observed while planning is already old by then: nodes run in parallel, earlier
 stages move things, and the user may have changed the scene.
 
-## Before the irreversible node starts
+## Before the acting node starts
 
 - Name the precondition in one sentence: "the object is at X", "the gripper is empty", "the file
   contains Y". If you cannot state it, you are not ready to act.
