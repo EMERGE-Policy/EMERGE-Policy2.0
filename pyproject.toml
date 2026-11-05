@@ -21,20 +21,21 @@ dependencies = [
 
 [project.optional-dependencies]
 # The RoboDojo simulator (robot/robodojo), in the same environment as emerge: the versions of RoboDojo's
-# scripts/install.sh. Isaac Lab and cuRobo come from RoboDojo's submodules (see [tool.uv.sources]).
-# Install with uv, which reads [tool.uv] below: uv pip install -e ".[robodojo]" (see docs/robot-interface.md, 7).
+# scripts/install.sh. Isaac Lab and cuRobo are RoboDojo's submodules, referenced by path ({root:uri} is the
+# folder of this file, filled in by hatchling when the metadata is built). torch and isaacsim come from their
+# own indexes, so install them first (see README.md); here they only pin the versions.
 robodojo = [
     "torch==2.7.0",
     "torchvision==0.22.0",
     "torchaudio==2.7.0",
     "isaacsim[all,extscache]==5.1.0",
-    "isaaclab",
-    "isaaclab-assets",
-    "isaaclab-contrib",
-    "isaaclab-tasks",
-    "isaaclab-rl",
-    "isaaclab-mimic",
-    "nvidia-curobo[cu12]",
+    "isaaclab @ {root:uri}/third_party/RoboDojo/third_party/IsaacLab/source/isaaclab",
+    "isaaclab-assets @ {root:uri}/third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_assets",
+    "isaaclab-contrib @ {root:uri}/third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_contrib",
+    "isaaclab-tasks @ {root:uri}/third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_tasks",
+    "isaaclab-rl[none] @ {root:uri}/third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_rl",
+    "isaaclab-mimic[none] @ {root:uri}/third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_mimic",
+    "nvidia-curobo[cu12] @ {root:uri}/third_party/RoboDojo/third_party/curobo",
     "numpy==1.26.0",
     "packaging==23.0",
     "filelock==3.13.1",
@@ -59,6 +60,10 @@ robodojo = [
 [project.scripts]
 emerge = "tui.cli:main"
 
+[tool.hatch.metadata]
+# The robodojo extra points at the submodules by path.
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["emerge", "robot", "tui"]
 
@@ -82,13 +87,6 @@ override-dependencies = ["starlette==0.45.3", "typing_extensions>=4.14"]
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }
-isaaclab = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab", editable = true }
-isaaclab-assets = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_assets", editable = true }
-isaaclab-contrib = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_contrib", editable = true }
-isaaclab-tasks = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_tasks", editable = true }
-isaaclab-rl = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_rl", editable = true }
-isaaclab-mimic = { path = "third_party/RoboDojo/third_party/IsaacLab/source/isaaclab_mimic", editable = true }
-nvidia-curobo = { path = "third_party/RoboDojo/third_party/curobo", editable = true }
 
 [[tool.uv.index]]
 # Isaac Sim's wheels (the isaacsim-* entries on PyPI are placeholders).
