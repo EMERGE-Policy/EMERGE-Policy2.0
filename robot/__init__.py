@@ -10,7 +10,9 @@ The beat, the file formats and the driver contract are described in docs/robot-i
 from robot.base import (
     ArmBusy,
     ArmHeld,
+    BodyViolation,
     CommandBusy,
+    ManifestError,
     Launch,
     RobotClient,
     RobotDriver,
@@ -30,7 +32,9 @@ from robot.base import (
 __all__ = [
     "ArmBusy",
     "ArmHeld",
+    "BodyViolation",
     "CommandBusy",
+    "ManifestError",
     "Launch",
     "RobotClient",
     "RobotDriver",

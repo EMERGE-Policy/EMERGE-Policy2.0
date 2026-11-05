@@ -1,12 +1,14 @@
-"""STATE.json and OBSERVATION.json: what one tick shows the nodes.
+"""STATE.json and OBSERVATION.json: what one tick shows the nodes of one body.
 
 A **snapshot** is everything a node can see of the world at one tick, taken in one go while it stands
-still. It has two halves, kept in two files:
+still. It has two halves, kept in two files of the body's folder:
 
-    state        every arm's joints, end-effector pose and gripper     STATE.json
-    observation  every camera's image and matrices, and `extra`        OBSERVATION.json
+    state        the joints, end-effector pose and gripper of the body's arms     STATE.json
+    observation  the image and matrices of the cameras it sees, and `extra`       OBSERVATION.json
 
-(The **scene** is something else: what the simulation needs to bring the world back. Nodes never see it.)
+Every body has a snapshot of its own for each tick, cut from the same moment of the world: only its own arms,
+its own cameras and the shared ones, poses in its own frame. (The **scene** is something else: what the
+simulation needs to bring the world back. Nodes never see it.)
 
 A snapshot is published once and never changed, so nothing here takes a lock. Its files are written in an
 order readers can rely on:
@@ -17,19 +19,21 @@ order readers can rely on:
     3. OBSERVATION.json               the latest observation
     4. STATE.json                     the latest state, last of all
 
-so once STATE.json shows a tick, every file of that tick is in place.
+so once STATE.json shows a tick, every file of that tick is in place. All bodies are published before
+TICK.json, in the robot folder, shows the tick: it says every body has its snapshot.
 
 Image paths are relative to the conversation folder, as every path handed out in a conversation is.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from robot.base.protocol.fileio import read_json, write_json
-from robot.base.protocol.paths import history_dir, observation_path, state_path
+from robot.base.protocol.paths import body_dir, history_dir, observation_path, state_path, tick_path
 
 
 @dataclass(frozen=True)
@@ -37,13 +41,13 @@ class ArmState:
     """One arm, as measured."""
 
     joint_positions: list[float]  # radians
-    ee_pose: list[float]  # [x, y, z, qw, qx, qy, qz], world frame, metres
+    ee_pose: list[float]  # [x, y, z, qw, qx, qy, qz], in the body's frame, metres
     gripper: float  # 0 closed .. 1 fully open
 
 
 @dataclass(frozen=True)
 class State:
-    """STATE.json: every arm at `tick`."""
+    """STATE.json: the arms of one body at `tick`."""
 
     tick: int
     arms: dict[str, ArmState]
@@ -51,16 +55,16 @@ class State:
 
 @dataclass(frozen=True)
 class Camera:
-    """One camera: its image, and the matrices that place it in the world."""
+    """One camera: its image, and the matrices that place it."""
 
     image: str  # the JPEG, relative to the conversation folder
     intrinsics: list[list[float]]  # 3×3
-    extrinsics: list[list[float]]  # 4×4, camera to world
+    extrinsics: list[list[float]]  # 4×4, camera to the body's frame
 
 
 @dataclass(frozen=True)
 class Observation:
-    """OBSERVATION.json: every camera at `tick`, and whatever else the driver adds."""
+    """OBSERVATION.json: the cameras one body sees at `tick`, and the `extra` fields it may see."""
 
     tick: int
     cameras: dict[str, Camera]
@@ -69,7 +73,7 @@ class Observation:
 
 @dataclass(frozen=True)
 class Snapshot:
-    """The state and the observation of one tick."""
+    """The state and the observation of one body at one tick."""
 
     state: State
     observation: Observation
@@ -84,13 +88,23 @@ class Snapshot:
 
 
 def publish(folder: Path, snapshot: Snapshot) -> None:
-    """Write the snapshot's files in the order above. Its images must already be written."""
+    """Write one body's snapshot, in `folder`, the body's folder, in the order above. Its images must already be written."""
     tick = snapshot.tick
     state, observation = asdict(snapshot.state), asdict(snapshot.observation)
     write_json(state_path(folder, tick), state)
     write_json(observation_path(folder, tick), observation)
     write_json(observation_path(folder), observation)
     write_json(state_path(folder), state)
+
+
+def publish_all(folder: Path, snapshots: Mapping[str, Snapshot]) -> None:
+    """Write every body's snapshot, in `folder`, the robot folder, then TICK.json. All are of one tick."""
+    ticks = {snapshot.tick for snapshot in snapshots.values()}
+    if len(ticks) != 1:
+        raise ValueError(f"the snapshots of one moment are of one tick, got {sorted(ticks)}")
+    for body, snapshot in snapshots.items():
+        publish(body_dir(folder, body), snapshot)
+    write_json(tick_path(folder), {"tick": ticks.pop()})
 
 
 def next_tick(folder: Path) -> int:
@@ -100,12 +114,13 @@ def next_tick(folder: Path) -> int:
 
 
 def latest_tick(folder: Path) -> int | None:
-    """The last tick this robot folder kept a snapshot of; None before the first."""
+    """The last tick this robot folder kept a snapshot of, in any body; None before the first."""
     ticks: list[int] = []
-    state = read_json(state_path(folder))
-    if isinstance(state, dict) and isinstance(state.get("tick"), int):
-        ticks.append(state["tick"])
-    history = history_dir(folder)
-    if history.is_dir():
-        ticks.extend(int(path.name) for path in history.iterdir() if path.name.isdigit())
+    marker = read_json(tick_path(folder))
+    if isinstance(marker, dict) and isinstance(marker.get("tick"), int):
+        ticks.append(marker["tick"])
+    for body in folder.iterdir() if folder.is_dir() else ():
+        history = history_dir(body)
+        if history.is_dir():
+            ticks.extend(int(path.name) for path in history.iterdir() if path.name.isdigit())
     return max(ticks, default=None)

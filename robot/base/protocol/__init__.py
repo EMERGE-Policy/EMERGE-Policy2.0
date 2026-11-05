@@ -4,12 +4,14 @@ Nodes (`client`), the simulation (`simulation`) and front ends (`frontend`) neve
 only read and write the files of a conversation's robot folder. What those files are, what they hold and
 how they are written is decided here, once, and every side uses it. Nothing here knows about any side.
 
-    paths        where each file lives
+    paths        where each file lives; each body has a folder of its own
     fileio       how a file is written whole, and changed under a lock
+    manifest     which body owns which arm and camera, written by hand and checked against the driver
+    frames       poses in a body's frame and in the world's, one pair of functions for reading and sending
     lifecycle    what an action and a command have in common: their status, and how they end
-    actions      ACTION.json: who holds each arm, and the actions sent to it
+    actions      ACTION.json: who holds each arm of a body, and the actions sent to it
     commands     COMMAND.json: the one command a front end gave the simulation
-    snapshots    STATE.json and OBSERVATION.json: what one tick shows the nodes
+    snapshots    STATE.json and OBSERVATION.json: what one tick shows the nodes of one body
 
 Two kinds of file, two rules:
 

@@ -1,6 +1,6 @@
 # 机器人底层接口（设计草案）
 
-更新于 2026-11-04：TUI 搬到顶层，由它为每个对话启动底层（4.8～4.10）。接通 RoboDojo（第 6 节）。机器人文件改成每个对话一套，放在 `sessions/<对话>/robot/`；底层每走一拍就覆盖保存一次场景，启动时从这个场景文件恢复；节点不碰场景，场景操作走留给 TUI 的命令口 `COMMAND.json`。2026-11-03：本体状态和观测分成 `STATE.json`、`OBSERVATION.json` 两个文件。RoboDojo 部分对照 `third_party/RoboDojo`（`f57e163`）的源码核实过。
+更新于 2026-11-06：加入本体隔离（见 2.9）：每个本体一个文件夹，`ACTION.json`、`STATE.json`、`OBSERVATION.json`、`ROBOT.md`、`obs/` 都在本体文件夹里，不再放在 `robot/` 顶层；`RobotClient` 构造时绑定本体；位姿用本体系；新增 `config.json`。2.1～2.8、第 4、5 节里按"整机一套文件"写的地方，以 2.9 为准。2026-11-04：TUI 搬到顶层，由它为每个对话启动底层（4.8～4.10）。接通 RoboDojo（第 6 节）。机器人文件改成每个对话一套，放在 `sessions/<对话>/robot/`；底层每走一拍就覆盖保存一次场景，启动时从这个场景文件恢复；节点不碰场景，场景操作走留给 TUI 的命令口 `COMMAND.json`。2026-11-03：本体状态和观测分成 `STATE.json`、`OBSERVATION.json` 两个文件。RoboDojo 部分对照 `third_party/RoboDojo`（`f57e163`）的源码核实过。
 
 ## 0. 一句话
 
@@ -197,6 +197,73 @@ workspace/
 ### 2.8 ROBOT.md
 
 一段文字，介绍这个本体，底层每次启动时写一次。
+
+### 2.9 本体隔离（manifest）
+
+**本体**是一个节点操作的对象：它的臂、它的相机、它自己的位姿坐标系。本体之间互相不知道对方，谁拥有什么只在一个地方写明：每个环境手写的 `manifest.json`（RoboDojo 的在 `robot/robodojo/manifest.json`）。
+
+```json
+{
+  "bodies": {
+    "left":  {"arms": ["left_arm"],  "cameras": ["cam_head", "cam_left_wrist"], "extra": ["instruction"], "base_pose": [-0.3, -0.45, 0.765, 0.7071, 0, 0, 0.7071], "allowed_actions": ["move_joints", "move_ee", "set_gripper", "stay"]},
+    "right": {"arms": ["right_arm"], "cameras": ["cam_head", "cam_right_wrist"], "extra": ["instruction"], "base_pose": [0.3, -0.45, 0.765, 0.7071, 0, 0, 0.7071], "allowed_actions": ["move_joints", "move_ee", "set_gripper", "stay"]}
+  }
+}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `arms` | 本体的所有臂；一条臂恰好属于一个本体 |
+| `cameras` | 这个本体看得到的相机；两个本体都看得到的相机（如头部相机拍得到对侧的臂，这是物理事实）各写一遍 |
+| `extra` | 观测的 `extra` 里这个本体看得到的字段，其余丢掉 |
+| `base_pose` | `[x, y, z, qw, qx, qy, qz]`，本体系在世界里的位置。本体读到和发出的位姿都在这个系里；不写就用世界系 |
+| `allowed_actions` | 本体能发的动作类型；不写就是驱动支持的都能发 |
+
+**启动时检查**：驱动的 `manifest()` 必须恰好拥有 `arm_names()` 和 `camera_names()`，多一个或少一个，`run_simulation` 直接拒绝运行（`ManifestError`）。
+
+**文件**：
+
+```
+robot/
+  MANIFEST.json            每个本体的臂和相机（底层启动时写）
+  TICK.json                最新一拍的拍号，所有本体的快照都发完才写
+  COMMAND.json  scene  launch.json  first_scene  simulation.log     底层和前端自己的，留在顶层
+  <本体>/
+    BODY.json              这个本体拥有的臂、看得到的相机、允许的动作；不含其他本体
+    ROBOT.md  ACTION.json  STATE.json  OBSERVATION.json  obs/<拍号>/
+```
+
+- 一个本体的文件里只有它自己的臂和 manifest 里列给它的相机，位姿和相机外参换算到本体系；对侧的数据不会出现在里面。
+- 所有本体的快照取自同一拍，各自发布；全部发完才写 `TICK.json`。`SimulationProcess` 的状态和拍号读它。
+
+**节点这一侧**：`RobotClient(session_dir, run, node, body)` 构造时绑定一个本体，只读写这个本体的文件夹。对不属于本体的臂、不在 `allowed_actions` 里的动作，在碰任何文件之前抛 `BodyViolation`；报错里只出现本体自己的内容。谁绑哪个本体由上层决定，不由节点自己选。
+
+**执行这一侧**：底层每一轮都对每个本体的 `ACTION.json` 再校验一次，防的是绕过 client 直接写文件：
+
+- 出现不属于该本体的臂：丢弃。
+- 动作类型不在 `allowed_actions` 里：记为 failed，结果写 "Failed: body '<本体>' may not send '<动作>'."
+- 动作参数里的位姿（驱动用 `pose_parameters()` 声明，如 `move_ee` 的 `pose`）从本体系换算成世界系再交给驱动，读和写用同一对函数（`protocol/frames.py`），所以驱动始终在世界系里工作。
+- 动作结果只写回发起的本体，结果里别的本体的臂名换成 "another arm"。
+- 驱动的 `describe(body)` 只描述这个本体，不提对侧，位姿用本体系。
+
+**边界**：隔离的是内容，不是时序。时钟仍然只有一个，所有被占着的臂都有动作才一起开始，所以一个节点能从延迟里推测对面在忙。防的是误用和顺手一读，不防存心去读同一文件系统里别的文件。
+
+### 2.10 config.json
+
+每个环境自带一份 `config.json`，放在环境文件夹里（RoboDojo 的在 `robot/robodojo/config.json`，由驱动的 `config_path()` 指明；`python -m robot --robot-config <文件>` 可换），每个键都可省略，写错键名会直接报错：
+
+| 键 | 默认 | 含义 |
+|---|---|---|
+| `driver` | `{}` | 驱动构造参数的默认值（RoboDojo 的 `env_cfg`、`device_id`、`layout_seed`、`step_lim`、`finish_on_episode_end`、`headless`）；对话的 `launch.json` 里的同名项优先 |
+
+其余键：
+
+| 键 | 默认 | 含义 |
+|---|---|---|
+| `poll_interval` | 0.01 | 没有东西在动时，每隔多少秒看一次文件 |
+| `jpeg_quality` | 95 | 各本体 `obs/` 下图像的 JPEG 质量，1～100 |
+| `log_level` | `INFO` | `DEBUG`、`INFO`、`WARNING`、`ERROR` |
+| `save_scene` | `true` | 每走一拍存一次场景；关掉后再启动，是从上一份存下的场景接着跑，不是从停下的地方 |
 
 ## 3. 节拍
 

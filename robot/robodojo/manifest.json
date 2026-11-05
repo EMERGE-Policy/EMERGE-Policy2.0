@@ -1,0 +1,18 @@
+{
+  "bodies": {
+    "left": {
+      "arms": ["left_arm"],
+      "cameras": ["cam_head", "cam_left_wrist"],
+      "extra": ["instruction"],
+      "base_pose": [-0.3, -0.45, 0.765, 0.7071067811865476, 0, 0, 0.7071067811865476],
+      "allowed_actions": ["move_joints", "move_ee", "set_gripper", "stay"]
+    },
+    "right": {
+      "arms": ["right_arm"],
+      "cameras": ["cam_head", "cam_right_wrist"],
+      "extra": ["instruction"],
+      "base_pose": [0.3, -0.45, 0.765, 0.7071067811865476, 0, 0, 0.7071067811865476],
+      "allowed_actions": ["move_joints", "move_ee", "set_gripper", "stay"]
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "poll_interval": 0.01,
+  "jpeg_quality": 95,
+  "log_level": "INFO",
+  "save_scene": true,
+  "driver": {
+    "env_cfg": "arx_x5",
+    "device_id": 0,
+    "layout_seed": 0,
+    "step_lim": 100000,
+    "finish_on_episode_end": true,
+    "headless": true
+  }
+}

@@ -1,18 +1,24 @@
-"""`RobotClient`: what a node uses to operate the robot.
+"""`RobotClient`: what a node uses to operate one body of the robot.
 
-A node holds and releases arms, sends actions, and reads the robot's state and observations. Every method
-is one read of the conversation's robot folder, or one change to ACTION.json under its lock, and returns
-at once: nothing here waits for the simulation. How long to wait for an action, and what to do meanwhile,
-is the node's own rule. Scenes are not a node's business.
+A node is bound to one body when it is made, and sees only that body's folder: its arms, its cameras, its
+state and observations, poses in its frame. What other bodies own, hold or see is not in that folder, and
+nothing here asks for it. Asked for an arm or an action type that is not the body's, a method raises
+`BodyViolation` before it touches a file.
+
+A node holds and releases arms, sends actions, and reads the body's state and observations. Every method
+is one read of the body's folder, or one change to its ACTION.json under its lock, and returns at once:
+nothing here waits for the simulation. How long to wait for an action, and what to do meanwhile, is the
+node's own rule. Scenes are not a node's business.
 
 In a node:
 
-    robot = RobotClient(ctx.session_dir, run=ctx.run_id, node=ctx.node_id)
+    robot = RobotClient(ctx.session_dir, run=ctx.run_id, node=ctx.node_id, body="left")
 
 An environment's client subclasses it and adds helpers for its own actions (`RoboDojoClient.move_joints`).
 
 The rules it keeps whenever it changes ACTION.json:
 
+    own     an arm or an action type that is not the body's is refused               BodyViolation
     held    an arm another node of this run holds is not this node's to use      ArmHeld
     busy    an arm with an unfinished action of this run takes no new one        ArmBusy
     whole   a send to several arms adds all of its actions or none: a refusal
@@ -28,42 +34,51 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from robot.base.errors import ArmBusy, ArmHeld, RobotError
+from robot.base.errors import ArmBusy, ArmHeld, BodyViolation, RobotError
 from robot.base.protocol.actions import Action, ActionFile, Arm, Holder
 from robot.base.protocol.fileio import read_json
 from robot.base.protocol.lifecycle import new_id
-from robot.base.protocol.paths import description_path, observation_path, robot_dir, state_path
+from robot.base.protocol.paths import body_dir, body_path, description_path, observation_path, robot_dir, state_path
 
 
 class RobotClient:
-    """Node `node` of run `run`, using the robot of the conversation in `session_dir` (`ctx.session_dir`)."""
+    """Node `node` of run `run`, operating `body` of the robot of the conversation in `session_dir` (`ctx.session_dir`)."""
 
-    def __init__(self, session_dir: Path | str, run: str, node: str) -> None:
-        for what, value in (("run", run), ("node", node)):
+    def __init__(self, session_dir: Path | str, run: str, node: str, body: str) -> None:
+        for what, value in (("run", run), ("node", node), ("body", body)):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"a RobotClient needs a {what} name")
         self.run = run
         self.node = node
+        self.body = body
         self.session_dir = Path(session_dir)
-        self.folder = robot_dir(self.session_dir)
+        self.folder = body_dir(robot_dir(self.session_dir), body)
+        record = read_json(body_path(self.folder))
+        if not isinstance(record, dict) or not isinstance(record.get("arms"), list):
+            raise RobotError(f"no body {body!r} in {robot_dir(self.session_dir)}; is the simulation running?")
+        # What the body owns, as the simulation wrote it at start: the only arms and actions this client may use.
+        self.arms: tuple[str, ...] = tuple(record["arms"])
+        allowed = record.get("allowed_actions")
+        self.allowed_actions: tuple[str, ...] | None = None if allowed is None else tuple(allowed)
 
-    # -- the robot -------------------------------------------------------------------
+    # -- the body --------------------------------------------------------------------
 
     def read_description(self) -> str:
-        """What this robot is, in prose (ROBOT.md)."""
+        """What this body is, in prose (ROBOT.md)."""
         try:
             return description_path(self.folder).read_text(encoding="utf-8")
         except FileNotFoundError:
-            raise RobotError(f"no robot description in {self.folder}; is the simulation running?") from None
+            raise RobotError(f"no description of body {self.body!r}; is the simulation running?") from None
 
     # -- arms ------------------------------------------------------------------------
 
     def hold(self, arm: str) -> None:
         """Hold `arm`: until it is released, the simulation waits for this node whenever the arm has no action.
 
-        Holding an arm this node already holds does nothing. Raises ArmHeld when another node of this run
-        holds it; a holder from another run counts as nobody.
+        Holding an arm this node already holds does nothing. Raises BodyViolation for an arm that is not the
+        body's, and ArmHeld when another node of this run holds it; a holder from another run counts as nobody.
         """
+        self._own_arm(arm)
         with ActionFile.edit(self.folder) as action_file:
             entry = action_file.arm(arm)
             self._refuse_if_held(arm, entry)
@@ -72,8 +87,10 @@ class RobotClient:
     def release(self, arm: str) -> None:
         """Let `arm` go once this node will send it nothing more; the simulation stops waiting for it.
 
-        Releasing an arm nobody holds does nothing. Raises ArmHeld when another node of this run holds it.
+        Releasing an arm nobody holds does nothing. Raises BodyViolation for an arm that is not the body's,
+        and ArmHeld when another node of this run holds it.
         """
+        self._own_arm(arm)
         with ActionFile.edit(self.folder) as action_file:
             entry = action_file.arm(arm)
             self._refuse_if_held(arm, entry)
@@ -85,9 +102,13 @@ class RobotClient:
         """Send actions, {arm: (action_type, parameters)}, decided on the snapshot of tick `step`.
 
         Actions sent together start with the same tick. Returns {arm: action id}. Nothing at all is sent
-        when one of the arms is held by another node of this run (ArmHeld) or still has an action of this
-        run that has not ended (ArmBusy). An unfinished action another run left is replaced.
+        when one of the arms or action types is not the body's (BodyViolation), when one of the arms is held
+        by another node of this run (ArmHeld) or still has an action of this run that has not ended (ArmBusy).
+        An unfinished action another run left is replaced.
         """
+        for arm, (action_type, _) in actions.items():
+            self._own_arm(arm)
+            self._own_action(action_type)
         ids: dict[str, str] = {}
         with ActionFile.edit(self.folder) as action_file:
             for arm, (action_type, parameters) in actions.items():
@@ -102,18 +123,20 @@ class RobotClient:
 
     def read_action(self, arm: str) -> dict[str, Any] | None:
         """The arm's current action, with its status and result; None when it has had none."""
+        self._own_arm(arm)
         action = ActionFile.read(self.folder).arm(arm).current
         return action.to_json() if action is not None else None
 
     def read_actions(self, arm: str) -> list[dict[str, Any]]:
         """Every action the arm was sent, oldest first; the last is the current one."""
+        self._own_arm(arm)
         return [action.to_json() for action in ActionFile.read(self.folder).arm(arm).actions]
 
     # -- state and observations ----------------------------------------------------------
 
     def read_state(self, tick: int | None = None) -> dict[str, Any] | None:
-        """The latest state (STATE.json), or the one of `tick`: every arm's joints, end-effector pose and
-        gripper. None when there is no such state.
+        """The latest state (STATE.json), or the one of `tick`: this body's arms' joints, end-effector pose (in
+        the body's frame) and gripper. None when there is no such state.
 
         STATE.json is written last of its tick, so once it shows a tick, `read_observation(state["tick"])`
         is the observation taken with it.
@@ -121,11 +144,21 @@ class RobotClient:
         return read_json(state_path(self.folder, tick))
 
     def read_observation(self, tick: int | None = None) -> dict[str, Any] | None:
-        """The latest observation (OBSERVATION.json), or the one of `tick`: every camera's image and
-        matrices. None when there is no such observation. Image paths are relative to `session_dir`."""
+        """The latest observation (OBSERVATION.json), or the one of `tick`: the image and matrices of every camera
+        this body sees. None when there is no such observation. Image paths are relative to `session_dir`."""
         return read_json(observation_path(self.folder, tick))
 
     # -- the rules ---------------------------------------------------------------------
+
+    def _own_arm(self, arm: str) -> None:
+        if arm not in self.arms:
+            raise BodyViolation(f"{arm!r} is not an arm of body {self.body!r}; its arms are {list(self.arms)}")
+
+    def _own_action(self, action_type: str) -> None:
+        if self.allowed_actions is not None and action_type not in self.allowed_actions:
+            raise BodyViolation(
+                f"body {self.body!r} may not send {action_type!r}; its action types are {list(self.allowed_actions)}"
+            )
 
     def _refuse_if_held(self, name: str, arm: Arm) -> None:
         holder = arm.holder

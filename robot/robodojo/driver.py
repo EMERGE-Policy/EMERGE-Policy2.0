@@ -38,25 +38,30 @@ from typing import Any
 
 import numpy as np
 
-from robot.base.simulation.driver import RobotDriver, SceneChoice
 from robot.base.errors import RobotError
+from robot.base.protocol.manifest import Manifest
+from robot.base.simulation.driver import RobotDriver, SceneChoice
 
 logger = logging.getLogger(__name__)
 
 ROBODOJO_ROOT = Path(__file__).resolve().parents[2] / "third_party" / "RoboDojo"
 ARMS = ("left_arm", "right_arm")
+# Who owns which arm and camera: written by hand, next to this file.
+MANIFEST_PATH = Path(__file__).with_name("manifest.json")
+# The knobs of the robot layer for this environment, and the defaults of the arguments below.
+CONFIG_PATH = Path(__file__).with_name("config.json")
 # Kit extensions RoboDojo's scripts/eval_policy.sh enables.
 KIT_EXTENSIONS = ("isaacsim.replicator.behavior", "isaacsim.sensors.camera")
 DEFAULT_TICKS = {"move_joints": 25, "move_ee": 25, "set_gripper": 10, "stay": 1}
 
 DESCRIPTION = """\
-RoboDojo dual-arm robot (simulated in Isaac Sim): two ARX X5 arms, each with 6 joints and a parallel gripper.
-Left arm base at (-0.3, -0.45, 0.765) m, right arm base at (0.3, -0.45, 0.765) m, world frame; joint speed limit 5 rad/s.
-Cameras: cam_head (fixed, above and behind the table), cam_left_wrist and cam_right_wrist (on the wrists).
+One arm of a RoboDojo dual-arm robot (simulated in Isaac Sim): an ARX X5 arm with 6 joints and a parallel gripper; joint speed limit 5 rad/s.
+You operate <arm>. Poses are in the frame of its base: x, y, z in metres, orientation as a quaternion [qw, qx, qy, qz].
+Cameras: cam_head (fixed, above and behind the table) and <camera> (on the wrist).
 One tick is 0.04 s of simulated time (25 Hz).
-Actions, per arm, all in joint space:
+Actions, all in joint space:
   move_joints {"joints": [6 floats, rad], "gripper": 0..1 optional, "ticks": n}: straight line in joint space over n ticks
-  move_ee {"pose": [x, y, z, qw, qx, qy, qz], world frame, metres, "gripper": 0..1 optional, "ticks": n}: inverse kinematics once, then as move_joints; fails when there is no solution
+  move_ee {"pose": [x, y, z, qw, qx, qy, qz], base frame, metres, "gripper": 0..1 optional, "ticks": n}: inverse kinematics once, then as move_joints; fails when there is no solution
   set_gripper {"gripper": 0..1, "ticks": n}: 1 is fully open
   stay {"ticks": n}: stay where last commanded
 """
@@ -115,6 +120,10 @@ class RoboDojoDriver(RobotDriver):
         self._last: dict[str, dict[str, Any]] = {}
 
     @classmethod
+    def config_path(cls) -> Path:
+        return CONFIG_PATH
+
+    @classmethod
     def scenes(cls, env_cfg: str = "arx_x5", layout_seed: int = 0) -> list[SceneChoice]:
         """Every evaluation layout of every task: Assets/Eval_Layout/RoboDojo/<env_cfg>/<seed>/<task>_<n>.json."""
         folder = ROBODOJO_ROOT / "Assets" / "Eval_Layout" / "RoboDojo" / env_cfg / str(layout_seed)
@@ -131,14 +140,21 @@ class RoboDojoDriver(RobotDriver):
 
     # -- the robot ---------------------------------------------------------------
 
-    def describe(self) -> str:
-        return DESCRIPTION + f"Task: {self.task}.\n"
+    def describe(self, body: str) -> str:
+        text = DESCRIPTION.replace("<arm>", f"{body}_arm").replace("<camera>", f"cam_{body}_wrist")
+        return text + f"Task: {self.task}.\n"
 
     def arm_names(self) -> list[str]:
         return list(ARMS)
 
     def camera_names(self) -> list[str]:
         return list(self._env().camera_manager.camera_names[0])
+
+    def manifest(self) -> Manifest:
+        return Manifest.read(MANIFEST_PATH)
+
+    def pose_parameters(self) -> dict[str, tuple[str, ...]]:
+        return {"move_ee": ("pose",)}
 
     # -- lifecycle ---------------------------------------------------------------------
 
@@ -316,7 +332,7 @@ class RoboDojoDriver(RobotDriver):
         relative = list(np.asarray(pose[:3]) - origin) + list(pose[3:])
         result = env.robot_manager.solve_ik(target_pose=relative, env_idx=0, robot=self._robot(arm))
         if result.get("status") != "Success":
-            raise _Refused(f"no inverse kinematics solution for {arm} at {pose} ({result.get('status')}).")
+            raise _Refused(f"no inverse kinematics solution for that pose ({result.get('status')}).")
         return [float(x) for x in result["joint_value"]]
 
     def _last_command(self, arm: str) -> dict[str, Any]:

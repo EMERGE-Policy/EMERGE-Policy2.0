@@ -15,3 +15,11 @@ class ArmBusy(RobotError):
 
 class CommandBusy(RobotError):
     """The previous command has not ended."""
+
+
+class ManifestError(RobotError):
+    """The manifest is not well formed, or does not match what the driver has."""
+
+
+class BodyViolation(RobotError):
+    """A body was asked to use something that is not its own: an arm, a camera, an action."""

@@ -22,7 +22,7 @@ class RoboDojoClient(RobotClient):
 
     def move_ee(self, arm: str, pose: Sequence[float], step: int, *, gripper: float | None = None,
                 ticks: int = 25) -> str:
-        """Move `arm`'s end effector to `pose` ([x, y, z, qw, qx, qy, qz], world frame) over `ticks` ticks."""
+        """Move `arm`'s end effector to `pose` ([x, y, z, qw, qx, qy, qz], in the body's frame) over `ticks` ticks."""
         parameters = {"pose": [float(x) for x in pose], "ticks": ticks}
         if gripper is not None:
             parameters["gripper"] = float(gripper)

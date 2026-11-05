@@ -21,7 +21,7 @@ from typing import Any
 
 from robot.base.errors import RobotError
 from robot.base.protocol.fileio import read_json, write_bytes, write_json
-from robot.base.protocol.paths import first_scene_path, launch_path, log_path, robot_dir, scene_path, state_path
+from robot.base.protocol.paths import first_scene_path, launch_path, log_path, robot_dir, scene_path, tick_path
 
 
 @dataclass(frozen=True)
@@ -82,12 +82,12 @@ class SimulationProcess:
         code = self.process.poll()
         if code is not None:
             return f"exited ({code})"
-        state = state_path(self.folder)
+        state = tick_path(self.folder)
         return "running" if state.exists() and state.stat().st_mtime >= self.started_at else "starting"
 
     @property
     def tick(self) -> int | None:
-        state = read_json(state_path(self.folder)) if self.status == "running" else None
+        state = read_json(tick_path(self.folder)) if self.status == "running" else None
         return state.get("tick") if isinstance(state, dict) else None
 
     def stop(self, timeout: float = 60.0) -> int:

@@ -13,7 +13,7 @@ to give its nodes helpers for its own actions, then registers both in `frontend/
 """
 
 from robot.base.client import RobotClient
-from robot.base.errors import ArmBusy, ArmHeld, CommandBusy, RobotError
+from robot.base.errors import ArmBusy, ArmHeld, BodyViolation, CommandBusy, ManifestError, RobotError
 from robot.base.frontend import (
     Launch,
     SimulationProcess,
@@ -30,7 +30,9 @@ from robot.base.simulation import RobotDriver, SceneChoice, run_simulation
 __all__ = [
     "ArmBusy",
     "ArmHeld",
+    "BodyViolation",
     "CommandBusy",
+    "ManifestError",
     "Launch",
     "RobotClient",
     "RobotDriver",

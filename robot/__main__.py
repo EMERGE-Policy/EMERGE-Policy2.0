@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from robot.base.config import Config
 from robot.base.errors import RobotError
 from robot.base.frontend.launch import Launch, record_launch, recorded_launch
 from robot.base.frontend.registry import load_driver_class
@@ -33,13 +34,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--driver", help="record a new simulation: a registered environment name, or module:Class")
     parser.add_argument("--scene", type=Path, help="with --driver: the scene to start from")
     parser.add_argument("--config", type=Path, help="with --driver: JSON object passed to the driver as keyword arguments")
-    parser.add_argument(
-        "--poll-interval", type=float, default=0.01, help="seconds between looks at the files while nothing moves"
-    )
+    parser.add_argument("--robot-config", type=Path, help="a config.json to use instead of the environment's own (e.g. robot/robodojo/config.json)")
     args = parser.parse_args(argv)
     if (args.driver is None) != (args.scene is None) or (args.config is not None and args.driver is None):
         parser.error("--driver and --scene go together (with --config optionally), or none of them")
-    _log_to_stderr()
     try:
         if args.driver is not None:
             load_driver_class(args.driver)  # a name that is no driver is not recorded
@@ -47,11 +45,17 @@ def main(argv: list[str] | None = None) -> int:
         launch = recorded_launch(args.session)
         if launch is None:
             raise RobotError(f"no simulation is recorded for {args.session}; give --driver and --scene")
+        driver_class = load_driver_class(launch.driver)
+        # The environment's own config.json, unless --robot-config names another; its "driver" part gives the
+        # constructor defaults, and what the conversation's launch.json says takes their place.
+        config = Config.read(args.robot_config or driver_class.config_path())
+        _log_to_stderr(config.log_level)
+        arguments = {**config.driver, **launch.config}
         try:
-            driver = load_driver_class(launch.driver)(**launch.config)
+            driver = driver_class(**arguments)
         except TypeError as e:
-            raise RobotError(f"cannot construct the {launch.driver} driver with {launch.config}: {e}") from None
-        run_simulation(driver, args.session, first_scene_path(robot_dir(args.session)), poll_interval=args.poll_interval)
+            raise RobotError(f"cannot construct the {launch.driver} driver with {arguments}: {e}") from None
+        run_simulation(driver, args.session, first_scene_path(robot_dir(args.session)), config=config)
     except KeyboardInterrupt:
         return 130
     except RobotError as e:
@@ -60,14 +64,14 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _log_to_stderr() -> None:
+def _log_to_stderr(level: str = "INFO") -> None:
     """The robot layer's own log lines, on stderr. On the "robot" logger rather than the root one, which a
     simulator may take over when it starts (Isaac Sim does, and drops INFO lines)."""
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logger = logging.getLogger("robot")
     logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(level)
     logger.propagate = False
 
 

@@ -22,6 +22,8 @@ from typing import Any
 
 import numpy as np
 
+from robot.base.protocol.manifest import Manifest
+
 
 @dataclass(frozen=True)
 class SceneChoice:
@@ -45,11 +47,20 @@ class RobotDriver(ABC):
         """What this simulator can start from; cheap, nothing is started. Empty when it cannot say."""
         return []
 
+    @classmethod
+    def config_path(cls) -> Path | None:
+        """The config.json of this environment (see `robot.base.config`); None when it has none."""
+        return None
+
     # -- the robot (asked once, after start) ---------------------------------
 
     @abstractmethod
-    def describe(self) -> str:
-        """A paragraph saying what this robot is; ROBOT.md gets it as it is."""
+    def describe(self, body: str) -> str:
+        """A paragraph saying what `body` is; its ROBOT.md gets it as it is.
+
+        It says nothing of the other bodies, and gives poses in the body's own frame: this is all a node of
+        the body reads of the robot.
+        """
 
     @abstractmethod
     def arm_names(self) -> list[str]:
@@ -58,6 +69,13 @@ class RobotDriver(ABC):
     @abstractmethod
     def camera_names(self) -> list[str]:
         """Every camera, e.g. ["cam_head", "cam_left_wrist", "cam_right_wrist"]."""
+
+    @abstractmethod
+    def manifest(self) -> Manifest:
+        """Who owns which arm and camera: the bodies, written down by hand (see `protocol.manifest`).
+
+        It must own exactly `arm_names()` and `camera_names()`; the simulation refuses to run otherwise.
+        """
 
     # -- one snapshot (all called within one tick, while the world stands still) -----
 
@@ -90,6 +108,14 @@ class RobotDriver(ABC):
         return {}
 
     # -- execution -------------------------------------------------------------
+
+    def pose_parameters(self) -> dict[str, tuple[str, ...]]:
+        """Which parameters of which action types are poses, e.g. {"move_ee": ("pose",)}.
+
+        A node gives them in its body's frame; the simulation turns them into the world frame before
+        `execute_action` gets them, so a driver always works in the world frame.
+        """
+        return {}
 
     @abstractmethod
     def execute_action(self, actions: dict[str, dict[str, Any]]) -> dict[str, str]:
