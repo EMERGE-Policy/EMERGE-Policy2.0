@@ -11,6 +11,7 @@ own, and a node of a body reads and writes only there:
     launch.json                     which driver serves this conversation            front end
     first_scene                     the scene the conversation began with            front end
     simulation.log                  the simulation's output, as a process of its own front end
+    recorder/                       the driver's videos, when it records             driver
 
     <body>/                         one body's folder (`body_dir`): all a node of that body sees
         body.json                   what the body owns: its arms and cameras         simulation, at start
@@ -129,3 +130,8 @@ def first_scene_path(folder: Path) -> Path:
 
 def log_path(folder: Path) -> Path:
     return folder / "simulation.log"
+
+
+def recorder_dir(folder: Path) -> Path:
+    """Where a driver keeps its videos (`RobotDriver.folder` is the robot folder); nodes do not read them."""
+    return folder / "recorder"

@@ -89,6 +89,7 @@ def run_simulation(
     folder = robot_dir(session_dir)
     simulation: _Simulation | None = None
     try:
+        driver.folder = folder
         driver.start()
         _take_back_sigint()
         folder.mkdir(parents=True, exist_ok=True)

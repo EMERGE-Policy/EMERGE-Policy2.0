@@ -40,6 +40,7 @@ import numpy as np
 
 from robot.base.errors import RobotError
 from robot.base.protocol.manifest import Manifest
+from robot.base.protocol.paths import recorder_dir
 from robot.base.simulation.driver import RobotDriver, SceneChoice
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,8 @@ class RoboDojoDriver(RobotDriver):
                                evaluation episode; an agent trying things uses them up quickly)
         finish_on_episode_end  end the simulation when RoboDojo ends the episode (success or step limit), default true
         headless               default true
+        record                 RoboDojo's own episode video, one frame per tick, one mp4 per camera, default false;
+                               saved in the conversation's robot/recorder/ when the scene is reset or the simulation closes
     """
 
     def __init__(
@@ -103,6 +106,7 @@ class RoboDojoDriver(RobotDriver):
         step_lim: int = 100_000,
         finish_on_episode_end: bool = True,
         headless: bool = True,
+        record: bool = False,
     ) -> None:
         self.task = task
         self.env_cfg_name = env_cfg
@@ -111,6 +115,7 @@ class RoboDojoDriver(RobotDriver):
         self.step_lim = int(step_lim)
         self.finish_on_episode_end = bool(finish_on_episode_end)
         self.headless = bool(headless)
+        self.record = bool(record)
         self.app = None
         self.env = None
         self.layout_id: int | None = None
@@ -118,6 +123,10 @@ class RoboDojoDriver(RobotDriver):
         self._plans: dict[str, dict[str, Any]] = {}
         # Per arm: the last command, {"joints": [6], "gripper": 0..1}.
         self._last: dict[str, dict[str, Any]] = {}
+        # When recording: the observation taken after the last tick, which recorded its frame; None after a reset.
+        self._observation: dict[str, Any] | None = None
+        # How many videos have been saved, for their names.
+        self._videos = 0
 
     @classmethod
     def config_path(cls) -> Path:
@@ -213,6 +222,12 @@ class RoboDojoDriver(RobotDriver):
         config.sim.seed = [0]
         self.env = eval_env.create_eval_env(config, self.app)
         self.env.step_lim = self.step_lim
+        if self.record:
+            # RoboDojo's videos, in progress and done, go to the conversation's recorder/ instead of its eval_result/.
+            self.env._stream_dir = str(recorder_dir(self.folder))
+        else:
+            # RoboDojo adds a frame to its episode video at every get_obs.
+            self.env._stream_vision = lambda env_idx, frame: None
         logger.info("RoboDojo task %s ready (%d evaluation layouts)", self.task, len(self.env.seed_manager.seed_info))
 
     def close(self) -> None:
@@ -220,6 +235,8 @@ class RoboDojoDriver(RobotDriver):
         self.env = self.app = None
         if env is not None:
             try:
+                if self.record:
+                    self._save_video(env)
                 env.close()
             except Exception:
                 logger.exception("closing the RoboDojo environment failed")
@@ -246,7 +263,8 @@ class RoboDojoDriver(RobotDriver):
         return float(np.clip(_normalize_gripper(robot, value), 0.0, 1.0))
 
     def get_images(self) -> dict[str, np.ndarray]:
-        observation = self._env().get_obs()
+        # The tick's own observation when recording, so the snapshot adds no second frame.
+        observation = self._observation or self._env().get_obs()
         return {name: np.asarray(data["color"])[..., :3] for name, data in observation["vision"].items()}
 
     def get_intrinsics(self, camera: str) -> np.ndarray:
@@ -295,6 +313,9 @@ class RoboDojoDriver(RobotDriver):
             command[f"{side}_arm_joint_state"] = np.asarray(target["joints"], dtype=float)
             command[f"{side}_ee_joint_state"] = np.asarray([target["gripper"]], dtype=float)
         env.take_action(command)
+        if self.record:
+            # RoboDojo records a frame at every get_obs: one per tick, kept for get_images of the same tick.
+            self._observation = env.get_obs()
         for arm, plan in list(self._plans.items()):
             if plan["done"] >= plan["ticks"]:
                 results[arm] = f"{plan['verb']} {arm} in {plan['ticks']} ticks."
@@ -351,6 +372,9 @@ class RoboDojoDriver(RobotDriver):
         env = self._env()
         if layout_id not in env.seed_manager.seed_info:
             raise RobotError(f"task {self.task} has no evaluation layout {layout_id} (it has {len(env.seed_manager.seed_info)})")
+        if self.record:
+            self._save_video(env)
+        self._observation = None
         env.reset(seed=[layout_id])
         # What run_eval() does first: register the task's success checks (and score), without which
         # RoboDojo counts an episode with no checks as already successful.
@@ -370,6 +394,15 @@ class RoboDojoDriver(RobotDriver):
         Path(path).write_text(json.dumps(scene), encoding="utf-8")
 
     # -- internals ---------------------------------------------------------------------------
+
+    def _save_video(self, env) -> None:
+        """Finish RoboDojo's video of the episode so far, as recorder/<start time>_<n>_<camera>_<success|fail|unfinished>.mp4:
+        the time this process started, so a simulation started again does not write over earlier videos."""
+        if not env.video_writers.get(0):
+            return
+        tag = ("success" if env.success[0] else "fail") if env.end_flag[0] else "unfinished"
+        env.save_video(0, os.path.join(env._stream_dir, f"{env.run_id}_{self._videos}.mp4"), tag)
+        self._videos += 1
 
     def _env(self):
         if self.env is None:

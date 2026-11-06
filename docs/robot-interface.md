@@ -1,6 +1,6 @@
 # 机器人底层接口（设计草案）
 
-更新于 2026-11-06：机器人文件名统一小写（`manifest.json`、`command.json`、`tick.json`、`body.json`、`action.json`、`state.json`、`observation.json`），`ROBOT.md` 改名 `body.md`，`actions.jsonl` 改名 `history.jsonl`；下面以前的记录里用的还是旧名。同日早些时候：加入本体隔离（见 2.9）：每个本体一个文件夹，`ACTION.json`、`STATE.json`、`OBSERVATION.json`、`ROBOT.md`、`obs/` 都在本体文件夹里，不再放在 `robot/` 顶层；`RobotClient` 构造时绑定本体；位姿用本体系；新增 `config.json`。2.1～2.8、第 4、5 节里按"整机一套文件"写的地方，以 2.9 为准。2026-11-04：TUI 搬到顶层，由它为每个对话启动底层（4.8～4.10）。接通 RoboDojo（第 6 节）。机器人文件改成每个对话一套，放在 `sessions/<对话>/robot/`；底层每走一拍就覆盖保存一次场景，启动时从这个场景文件恢复；节点不碰场景，场景操作走留给 TUI 的命令口 `COMMAND.json`。2026-11-03：本体状态和观测分成 `STATE.json`、`OBSERVATION.json` 两个文件。RoboDojo 部分对照 `third_party/RoboDojo`（`f57e163`）的源码核实过。
+更新于 2026-11-06：RoboDojo 驱动可打开 RoboDojo 自带的回合录像，存进对话的 `robot/recorder/`（6.2 录像）；驱动多了 `folder` 属性（4.5）。早些时候：机器人文件名统一小写（`manifest.json`、`command.json`、`tick.json`、`body.json`、`action.json`、`state.json`、`observation.json`），`ROBOT.md` 改名 `body.md`，`actions.jsonl` 改名 `history.jsonl`；下面以前的记录里用的还是旧名。同日早些时候：加入本体隔离（见 2.9）：每个本体一个文件夹，`ACTION.json`、`STATE.json`、`OBSERVATION.json`、`ROBOT.md`、`obs/` 都在本体文件夹里，不再放在 `robot/` 顶层；`RobotClient` 构造时绑定本体；位姿用本体系；新增 `config.json`。2.1～2.8、第 4、5 节里按"整机一套文件"写的地方，以 2.9 为准。2026-11-04：TUI 搬到顶层，由它为每个对话启动底层（4.8～4.10）。接通 RoboDojo（第 6 节）。机器人文件改成每个对话一套，放在 `sessions/<对话>/robot/`；底层每走一拍就覆盖保存一次场景，启动时从这个场景文件恢复；节点不碰场景，场景操作走留给 TUI 的命令口 `COMMAND.json`。2026-11-03：本体状态和观测分成 `STATE.json`、`OBSERVATION.json` 两个文件。RoboDojo 部分对照 `third_party/RoboDojo`（`f57e163`）的源码核实过。
 
 ## 0. 一句话
 
@@ -52,6 +52,7 @@ workspace/
         first_scene              这个对话开始时的场景；重置命令回到它
         scene                    整个场景，底层每走一拍覆盖保存
         simulation.log           底层作为独立进程运行时的输出
+        recorder/                驱动的录像（RoboDojo 打开 record 时，见 6.2）
         obs/<拍号>/               每一拍的 state.json、observation.json 和各相机的 .jpg
 ```
 
@@ -242,7 +243,7 @@ robot/
 
 | 键 | 默认 | 含义 |
 |---|---|---|
-| `driver` | `{}` | 驱动构造参数的默认值（RoboDojo 的 `env_cfg`、`device_id`、`layout_seed`、`step_lim`、`finish_on_episode_end`、`headless`）；对话的 `launch.json` 里的同名项优先 |
+| `driver` | `{}` | 驱动构造参数的默认值（RoboDojo 的 `env_cfg`、`device_id`、`layout_seed`、`step_lim`、`finish_on_episode_end`、`headless`、`record`）；对话的 `launch.json` 里的同名项优先 |
 
 其余键：
 
@@ -403,6 +404,8 @@ class RobotDriver(ABC):
 ```
 
 驱动的构造函数只接收配置参数，不做耗时的事；真正启动仿真放在 `start()` 里，和 1.0 的 `load_environment()` 一样。
+
+`start()` 之前，底层把对话的 `robot/` 文件夹赋给驱动的 `folder` 属性（基类默认 `None`）。驱动要存自己的文件（比如录像）就放在这里，节点不读；位置由 `paths.py` 给，比如 `recorder_dir(folder)`。
 
 ### 4.6 底层什么时候调哪个方法
 
@@ -617,7 +620,7 @@ robot.release("left_arm")
 python -m robot --session <对话文件夹> --driver robodojo --scene first_scene.json --config robodojo.json
 ```
 
-- `robodojo.json`（驱动配置）：`{"task": "stack_bowls", "device_id": 5}`。可选项：`env_cfg`（默认 `arx_x5`）、`layout_seed`（评测布局集，默认 0）、`step_lim`（默认 100000；任务自带的上限是按一个评测回合定的，比如 `stack_blocks` 550 步，agent 反复尝试很快就会用完）、`finish_on_episode_end`（RoboDojo 判回合结束时底层退出，默认 true）、`headless`（默认 true）。换任务要换进程。
+- `robodojo.json`（驱动配置）：`{"task": "stack_bowls", "device_id": 5}`。可选项：`env_cfg`（默认 `arx_x5`）、`layout_seed`（评测布局集，默认 0）、`step_lim`（默认 100000；任务自带的上限是按一个评测回合定的，比如 `stack_blocks` 550 步，agent 反复尝试很快就会用完）、`finish_on_episode_end`（RoboDojo 判回合结束时底层退出，默认 true）、`headless`（默认 true）、`record`（RoboDojo 自带的回合录像，默认 false，见 6.2）。换任务要换进程。
 - `first_scene.json`（第一个场景）：`{"task": "stack_bowls", "layout_id": 0}`，指 `Assets/Eval_Layout/RoboDojo/arx_x5/<layout_seed>/stack_bowls_0.json` 这个评测布局。
 - 启动约 1 分钟（Isaac Sim 约 15 秒，建场景、cuRobo 编译内核占其余时间）；之后每拍约 140 ms（含每拍存一次场景）。
 
@@ -638,6 +641,9 @@ python -m robot --session <对话文件夹> --driver robodojo --scene first_scen
   动作结束时，实测值可能还没完全到目标（比如夹爪 10 拍后实测 0.19），之后几拍会继续收敛。
 
 - **观测**：关节 `rm.get_joint`，末端 `rm.get_real_endpose(is_relative=False)`（世界系），夹爪按 `gripper_scale` 归一化，图像取一次 `env.get_obs()` 的 `vision.<相机>.color`，内外参取 `camera_manager`。`get_extra` 给任务指令和步数：`{"instruction", "steps", "step_lim"}`。
+- **录像**：用 RoboDojo 自带的。它每调一次 `get_obs()` 就往回合视频里追加一帧（每个相机一个 mp4，帧率 `collect_freq`，`arx_x5` 是 25，正好是真实速度），但只在 `run_eval()` 里收尾，驱动不调它，所以驱动自己管：
+  - `record` 为 false（默认）：把这个追加关掉，不留半截的临时视频。
+  - `record` 为 true：每拍 `take_action` 之后调一次 `get_obs()`，一拍一帧；同一拍的快照直接用这次的观测，不多记一帧。录制中的临时文件和收尾后的视频都放在对话的 `robot/recorder/`（驱动把 RoboDojo 的 `_stream_dir` 指到这里，不再写它的 `eval_result/`）。重置场景（`load_scene`）前和关闭时调 `save_video` 收尾，存成 `recorder/<进程启动时间>_<序号>_<相机>_<success|fail|unfinished>.mp4`；回合没结束就是 `unfinished`，带启动时间是为了重启后不覆盖之前的视频。录制中的是 `env0_<相机>.tmp.mp4`，进程被杀时留下的会在下次录像时被覆盖。世界停着等节点时不走拍，视频里没有这段。
 - **回合结束**：RoboDojo 在任务成功或步数用完时结束回合，之后不再执行动作；`finish_on_episode_end` 为 true（默认）时底层随之退出。恢复场景时按当前的 `step_lim` 重新判断：因为步数用完而结束的，步数还有余量就继续；因为任务成功而结束的，仍是结束。
 - **场景文件**（JSON）：`{"task", "layout_id", "state"}`。`state` 里有：每条臂全部关节的位置和速度；每个物体（刚体、关节体、几何体）的位姿、速度、关节；流体的粒子位置；RoboDojo 的步数和回合标志；每条臂上一次的指令。`load_scene` 先按 `layout_id` 重建布局，再把 `state` 写回去。
 - **已实测**：把左臂摆到一个姿态后 `kill -9`，再用同一条命令启动，关节差 < 0.001 rad，碗的位姿、夹爪、步数一致，拍号接着数。
@@ -653,7 +659,7 @@ python -m robot --session <对话文件夹> --driver robodojo --scene first_scen
 | 末端模式每步只做一次 IK；IK 失败时那条臂不报错，原地不动 | `eval_env.py:415` |
 | obs 里的夹爪是上一次的命令值，不是实测值；1 表示全开 | `env/observation_manager/obs_manager.py:190`、`env/reward_manager/func_parser.py:1523` |
 | obs 里的末端位姿相对环境原点，相机外参却是世界系，驱动要统一成一个坐标系 | `env/robot_manager/robot_manager.py:131`、`env/camera_manager/camera_manager.py:469` |
-| `get_obs()` 只渲染、不推进物理，但会往回合视频里追加一帧 | `eval_env.py:269` |
+| `get_obs()` 只渲染、不推进物理，但会往回合视频里追加一帧；视频只在 `run_eval` 里由 `save_video` 收尾，`reset` 和 `close` 会把没收尾的丢掉 | `eval_env.py:269`、`eval_env.py:921`、`eval_env.py:199`、`eval_env.py:224` |
 | 任务成功或步数用完时回合结束；每次 `take_action` 之后都会自动检查 | `eval_env.py:465`、`eval_env.py:841` |
 | 两条臂共用一个 CuRobo 规划器，碰撞世界里只有桌子 | `robot_manager.py:51`、`env/planner_manager/curobo_planner.py:425` |
 | 左臂基座在 (-0.3, -0.45, 0.765)，右臂在 (0.3, -0.45, 0.765)；关节速度上限 5 rad/s | `env_cfg/robot/dual_x5.yml`、`env/robot_manager/robot_config/x5.py:41` |

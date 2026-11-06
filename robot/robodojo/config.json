@@ -9,6 +9,7 @@
     "layout_seed": 0,
     "step_lim": 100000,
     "finish_on_episode_end": true,
-    "headless": true
+    "headless": true,
+    "record": false
   }
 }

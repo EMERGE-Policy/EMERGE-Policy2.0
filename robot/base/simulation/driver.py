@@ -42,6 +42,10 @@ class SceneChoice:
 class RobotDriver(ABC):
     """One simulator. The constructor takes the configuration only; `start()` does the heavy work."""
 
+    # The conversation's robot folder, set by the simulation before `start()`: a driver may keep files of its own
+    # there, such as videos. Nodes do not read them.
+    folder: Path | None = None
+
     @classmethod
     def scenes(cls) -> list[SceneChoice]:
         """What this simulator can start from; cheap, nothing is started. Empty when it cannot say."""
