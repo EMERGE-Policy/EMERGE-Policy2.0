@@ -3,7 +3,7 @@
 **A file lands whole.** New content is written to a temporary file next to the old one, then renamed over
 it, so a reader sees the old file or the new one and never half of either. Readers need no lock.
 
-**A shared file is changed under a lock.** ACTION.json and COMMAND.json are written by two processes, so
+**A shared file is changed under a lock.** action.json and command.json are written by two processes, so
 each change is a read-modify-write while holding an exclusive lock on a sibling `.<name>.lock` file.
 """
 

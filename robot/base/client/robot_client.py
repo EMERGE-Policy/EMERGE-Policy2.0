@@ -6,7 +6,7 @@ nothing here asks for it. Asked for an arm or an action type that is not the bod
 `BodyViolation` before it touches a file.
 
 A node holds and releases arms, sends actions, and reads the body's state and observations. Every method
-is one read of the body's folder, or one change to its ACTION.json under its lock, and returns at once:
+is one read of the body's folder, or one change to its action.json under its lock, and returns at once:
 nothing here waits for the simulation. How long to wait for an action, and what to do meanwhile, is the
 node's own rule. Scenes are not a node's business.
 
@@ -16,7 +16,7 @@ In a node:
 
 An environment's client subclasses it and adds helpers for its own actions (`RoboDojoClient.move_joints`).
 
-The rules it keeps whenever it changes ACTION.json:
+The rules it keeps whenever it changes action.json:
 
     own     an arm or an action type that is not the body's is refused               BodyViolation
     held    an arm another node of this run holds is not this node's to use      ArmHeld
@@ -64,7 +64,7 @@ class RobotClient:
     # -- the body --------------------------------------------------------------------
 
     def read_description(self) -> str:
-        """What this body is, in prose (ROBOT.md)."""
+        """What this body is, in prose (body.md)."""
         try:
             return description_path(self.folder).read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -116,35 +116,33 @@ class RobotClient:
                 self._refuse_if_held(arm, entry)
                 self._refuse_if_busy(arm, entry)
                 ids[arm] = new_id()
-                entry.actions.append(
-                    Action(id=ids[arm], run=self.run, action_type=action_type, parameters=dict(parameters), step=step)
+                entry.action = Action(
+                    id=ids[arm], run=self.run, action_type=action_type, parameters=dict(parameters), step=step
                 )
         return ids
 
     def read_action(self, arm: str) -> dict[str, Any] | None:
-        """The arm's current action, with its status and result; None when it has had none."""
-        self._own_arm(arm)
-        action = ActionFile.read(self.folder).arm(arm).current
-        return action.to_json() if action is not None else None
+        """The arm's current action, with its status and result; None when it has had none.
 
-    def read_actions(self, arm: str) -> list[dict[str, Any]]:
-        """Every action the arm was sent, oldest first; the last is the current one."""
+        Only the current one: the actions before it are in the body's history.jsonl, for debugging, not for nodes.
+        """
         self._own_arm(arm)
-        return [action.to_json() for action in ActionFile.read(self.folder).arm(arm).actions]
+        action = ActionFile.read(self.folder).arm(arm).action
+        return action.to_json() if action is not None else None
 
     # -- state and observations ----------------------------------------------------------
 
     def read_state(self, tick: int | None = None) -> dict[str, Any] | None:
-        """The latest state (STATE.json), or the one of `tick`: this body's arms' joints, end-effector pose (in
+        """The latest state (state.json), or the one of `tick`: this body's arms' joints, end-effector pose (in
         the body's frame) and gripper. None when there is no such state.
 
-        STATE.json is written last of its tick, so once it shows a tick, `read_observation(state["tick"])`
+        state.json is written last of its tick, so once it shows a tick, `read_observation(state["tick"])`
         is the observation taken with it.
         """
         return read_json(state_path(self.folder, tick))
 
     def read_observation(self, tick: int | None = None) -> dict[str, Any] | None:
-        """The latest observation (OBSERVATION.json), or the one of `tick`: the image and matrices of every camera
+        """The latest observation (observation.json), or the one of `tick`: the image and matrices of every camera
         this body sees. None when there is no such observation. Image paths are relative to `session_dir`."""
         return read_json(observation_path(self.folder, tick))
 
@@ -166,6 +164,6 @@ class RobotClient:
             raise ArmHeld(f"{name} is held by {holder.node!r}")
 
     def _refuse_if_busy(self, name: str, arm: Arm) -> None:
-        action = arm.current
+        action = arm.action
         if action is not None and action.unfinished and action.run == self.run:
             raise ArmBusy(f"{name} still has action {action.id} ({action.status})")

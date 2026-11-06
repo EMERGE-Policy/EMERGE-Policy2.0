@@ -1,4 +1,4 @@
-"""COMMAND.json: the one command a front end gave the simulation, and how it went.
+"""command.json: the one command a front end gave the simulation, and how it went.
 
     {"id", "op", "status", "started_at", "result", "finished_at", "duration_ms"}
 
@@ -25,7 +25,7 @@ OPS = (RESET,)
 
 @dataclass
 class Command(Request):
-    """The command in COMMAND.json; every field None before the first."""
+    """The command in command.json; every field None before the first."""
 
     id: str | None = None
     op: str | None = None
@@ -43,13 +43,13 @@ class Command(Request):
 
     @classmethod
     def read(cls, folder: Path) -> Command:
-        """COMMAND.json as it is now."""
+        """command.json as it is now."""
         return cls.from_json(read_json(command_path(folder)) or {})
 
     @classmethod
     @contextmanager
     def edit(cls, folder: Path) -> Iterator[Command]:
-        """Change COMMAND.json under its lock. Nothing is written when the body raises."""
+        """Change command.json under its lock. Nothing is written when the body raises."""
         with edit_json(command_path(folder)) as value:
             command = cls.from_json(value)
             yield command

@@ -1,21 +1,21 @@
 # 机器人底层接口（设计草案）
 
-更新于 2026-11-06：加入本体隔离（见 2.9）：每个本体一个文件夹，`ACTION.json`、`STATE.json`、`OBSERVATION.json`、`ROBOT.md`、`obs/` 都在本体文件夹里，不再放在 `robot/` 顶层；`RobotClient` 构造时绑定本体；位姿用本体系；新增 `config.json`。2.1～2.8、第 4、5 节里按"整机一套文件"写的地方，以 2.9 为准。2026-11-04：TUI 搬到顶层，由它为每个对话启动底层（4.8～4.10）。接通 RoboDojo（第 6 节）。机器人文件改成每个对话一套，放在 `sessions/<对话>/robot/`；底层每走一拍就覆盖保存一次场景，启动时从这个场景文件恢复；节点不碰场景，场景操作走留给 TUI 的命令口 `COMMAND.json`。2026-11-03：本体状态和观测分成 `STATE.json`、`OBSERVATION.json` 两个文件。RoboDojo 部分对照 `third_party/RoboDojo`（`f57e163`）的源码核实过。
+更新于 2026-11-06：机器人文件名统一小写（`manifest.json`、`command.json`、`tick.json`、`body.json`、`action.json`、`state.json`、`observation.json`），`ROBOT.md` 改名 `body.md`，`actions.jsonl` 改名 `history.jsonl`；下面以前的记录里用的还是旧名。同日早些时候：加入本体隔离（见 2.9）：每个本体一个文件夹，`ACTION.json`、`STATE.json`、`OBSERVATION.json`、`ROBOT.md`、`obs/` 都在本体文件夹里，不再放在 `robot/` 顶层；`RobotClient` 构造时绑定本体；位姿用本体系；新增 `config.json`。2.1～2.8、第 4、5 节里按"整机一套文件"写的地方，以 2.9 为准。2026-11-04：TUI 搬到顶层，由它为每个对话启动底层（4.8～4.10）。接通 RoboDojo（第 6 节）。机器人文件改成每个对话一套，放在 `sessions/<对话>/robot/`；底层每走一拍就覆盖保存一次场景，启动时从这个场景文件恢复；节点不碰场景，场景操作走留给 TUI 的命令口 `COMMAND.json`。2026-11-03：本体状态和观测分成 `STATE.json`、`OBSERVATION.json` 两个文件。RoboDojo 部分对照 `third_party/RoboDojo`（`f57e163`）的源码核实过。
 
 ## 0. 一句话
 
-每个对话有自己的一套机器人文件，放在对话文件夹 `sessions/<对话>/robot/` 下。一个底层进程服务一个对话。节点写 `ACTION.json` 占臂、发动作，读 `STATE.json` 拿本体状态，读 `OBSERVATION.json` 拿观测。底层只有一个时钟，按"发观测 → 节点决策 → 一起执行 → 全部做完再发观测"的循环推进仿真；"发观测"指在同一拍写出本体状态和观测这两个文件，它们都带拍号，每个动作都标注它是在哪一拍下做出的。底层每走一拍就把整个场景覆盖保存到 `robot/scene`，进程被杀掉后再启动，会从这个文件回到原来的场景。节点不做场景操作；底层留了一个命令口 `COMMAND.json`，以后给 TUI 用，现在只有一个命令：重置场景。节点用的是所在环境的客户端，它继承 `RobotClient`。
+每个对话有自己的一套机器人文件，放在对话文件夹 `sessions/<对话>/robot/` 下。一个底层进程服务一个对话。节点写 `action.json` 占臂、发动作，读 `state.json` 拿本体状态，读 `observation.json` 拿观测。底层只有一个时钟，按"发观测 → 节点决策 → 一起执行 → 全部做完再发观测"的循环推进仿真；"发观测"指在同一拍写出本体状态和观测这两个文件，它们都带拍号，每个动作都标注它是在哪一拍下做出的。底层每走一拍就把整个场景覆盖保存到 `robot/scene`，进程被杀掉后再启动，会从这个文件回到原来的场景。节点不做场景操作；底层留了一个命令口 `command.json`，以后给 TUI 用，现在只有一个命令：重置场景。节点用的是所在环境的客户端，它继承 `RobotClient`。
 
 ## 1. 分工
 
 ```
 节点 A（左臂）、节点 B（右臂）……   sessions/<对话>/robot/            底层（跑在仿真器进程里）
-  占臂、发动作、等结果 ──写──▶  ACTION.json       ──读──▶  按节拍推进仿真，回填结果
-  读本体状态          ◀──读──  STATE.json        ◀──写──  仿真停下来时，同一拍写出本体状态
-  读观测              ◀──读──  OBSERVATION.json  ◀──写──  和观测
-  了解本体            ◀──读──  ROBOT.md          ◀──写──  启动时写一段介绍
+  占臂、发动作、等结果 ──写──▶  action.json       ──读──▶  按节拍推进仿真，回填结果
+  读本体状态          ◀──读──  state.json        ◀──写──  仿真停下来时，同一拍写出本体状态
+  读观测              ◀──读──  observation.json  ◀──写──  和观测
+  了解本体            ◀──读──  body.md           ◀──写──  启动时写一段介绍
 TUI（以后）
-  发命令（如重置场景）──写──▶  COMMAND.json      ──读──▶  执行命令，回填结果
+  发命令（如重置场景）──写──▶  command.json      ──读──▶  执行命令，回填结果
                                scene             ◀─读写─  启动时读；每走一拍覆盖写
 ```
 
@@ -43,11 +43,11 @@ workspace/
     <对话>/                      对话文件夹，节点的 ctx.session_dir
       .emerge/  trace.jsonl  memory/  code/  runs/
       robot/
-        ROBOT.md                 本体介绍
-        ACTION.json              每条臂：谁在用、当前动作
-        COMMAND.json             命令口：TUI 发来的命令（现在只有重置场景）
-        STATE.json               最新的本体状态
-        OBSERVATION.json         最新的观测
+        body.md                  本体介绍
+        action.json              每条臂：谁在用、当前动作
+        command.json             命令口：TUI 发来的命令（现在只有重置场景）
+        state.json               最新的本体状态
+        observation.json         最新的观测
         launch.json              这个对话的底层怎么启动：驱动名和驱动配置
         first_scene              这个对话开始时的场景；重置命令回到它
         scene                    整个场景，底层每走一拍覆盖保存
@@ -60,29 +60,16 @@ workspace/
 
 下面以对话里正在跑的 run `R3` 为例：节点 A 管左臂，B 管右臂，当前是第 15 拍。
 
-### 2.2 ACTION.json
+### 2.2 action.json
 
-每条臂两样东西：谁在用这条臂（`holder`），以及发给它的所有动作（`actions`，按时间顺序，最后一个是当前动作）。
+每个本体一份，每条臂两样东西：谁在用这条臂（`holder`），以及它的当前动作（`action`：正在做的，或者最近做完的那个）。
 
 ```json
 {
   "left_arm": {
     "holder": {"run": "R3", "node": "A"},
-    "actions": [
-      {"id": "a1c07d2e9f31", "run": "R3", "action_type": "...", "parameters": {}, "step": 0,
-       "status": "completed", "result": "...",
-       "started_at": "2026-11-04T10:00:00.000Z", "finished_at": "2026-11-04T10:00:01.000Z", "duration_ms": 1000},
-      {"id": "a3f9c2e17b04", "run": "R3", "action_type": "...", "parameters": {}, "step": 15,
-       "status": "running", "started_at": "2026-11-04T10:00:01.000Z"}
-    ]
-  },
-  "right_arm": {
-    "holder": {"run": "R3", "node": "B"},
-    "actions": [
-      {"id": "b81d0c55a9e2", "run": "R3", "action_type": "...", "parameters": {}, "step": 0,
-       "status": "completed", "result": "...",
-       "started_at": "2026-11-04T10:00:00.000Z", "finished_at": "2026-11-04T10:00:02.000Z", "duration_ms": 2000}
-    ]
+    "action": {"id": "a3f9c2e17b04", "run": "R3", "action_type": "...", "parameters": {}, "step": 15,
+               "status": "running", "started_at": "2026-11-04T10:00:01.000Z"}
   }
 }
 ```
@@ -101,12 +88,12 @@ workspace/
 
 - **holder**：谁在用这条臂，由节点写，记 run 和节点名；为 null 表示没人用。节点做完任务、不再发动作时，把它清成 null（即"放开"），底层就不再等这条臂。
 - **没占住也能发**：没人占的臂也能接动作，只是仿真不会为它停下来等。被同一个 run 里别的节点占着的臂，发动作会被拒（`ArmHeld`）。
-- **一次一个**：一条臂同时只能有一个没结束的动作，也就是只有列表的最后一个可能还没结束。
-- **历史**：动作一直留在列表里，底层重启也不清；拿动作上的 `step` 能找回当时的观测。代价是这个文件越来越大，每拍都要整体读写一次；几千个动作以内没问题，再多就要把已结束的挪到别的文件（之后的性能议题）。
-- **换 run**：同一个对话里，主 agent 结束一个 run、再开一个新的，场景和拍号都接着用。上一个 run 的节点已经停了，它留下的 holder 和没做完的动作不能留给新 run：别的 run 占着的臂，对新 run 的节点来说算没人占；底层一看到新 run 的请求，就把旧 run 的 holder 清掉，把它没做完的动作记为 failed，结果写 "Failed: run ended."。
+- **一次一个**：一条臂同时只能有一个没结束的动作；新动作直接取代当前动作，所以文件大小固定，每拍读它的开销不随对话变长。
+- **历史（给人 debug 用，节点不读）**：每个动作结束时（完成、失败、换 run、重置、重启、停止），底层往本体文件夹的 `history.jsonl` 追加一行完整记录（多一个 `arm` 字段）。只有底层写、只追加，不加锁，也不在每拍的读写路径上。`tail -f robot/left/history.jsonl` 就能看。
+- **被取代**：节点可以用新动作顶掉别的 run 留下、还没结束的动作。底层记得上一轮看到的未结束动作，发现它不见了，就在 `history.jsonl` 里记一行 "Failed: replaced by another action."，历史不会漏。- **换 run**：同一个对话里，主 agent 结束一个 run、再开一个新的，场景和拍号都接着用。上一个 run 的节点已经停了，它留下的 holder 和没做完的动作不能留给新 run：别的 run 占着的臂，对新 run 的节点来说算没人占；底层一看到新 run 的请求，就把旧 run 的 holder 清掉，把它没做完的动作记为 failed，结果写 "Failed: run ended."。
 - **加锁**：两边写这个文件都要加锁，写完后整体替换。
 
-### 2.3 STATE.json（本体状态）
+### 2.3 state.json（本体状态）
 
 机器人自身的状态，按臂组织。
 
@@ -127,7 +114,7 @@ workspace/
 | `arms.<臂>.ee_pose` | 末端位姿 `[x, y, z, qw, qx, qy, qz]`，世界系，单位米 |
 | `arms.<臂>.gripper` | 夹爪实测开度，0~1，1 = 全开 |
 
-### 2.4 OBSERVATION.json（观测）
+### 2.4 observation.json（观测）
 
 相机看到的外部世界，按相机组织。
 
@@ -156,10 +143,10 @@ workspace/
 - **同一拍**：本体状态和观测在同一拍一起拍，两个文件带同一个拍号；图像、臂的状态、相机内外参都来自这一拍。
 - **什么时候上传**：一次执行里所有动作都做完、仿真停下时上传一次。停着期间不重复上传，执行过程中也不上传。底层刚启动时也是停着的，所以启动后马上会上传一次。
 - **拍号**：每走一拍加 1，只增不减，按对话计数。对话第一次启动底层时从 0 开始；之后底层重启，接着上次最后的拍号往下数（上次最后一拍加 1）；重置场景时也不归零，接着加 1。
-- **按拍号存**：每拍的内容存在 `obs/<拍号>/` 下：`state.json`、`observation.json` 和各相机的 `.jpg`，存了就不再覆盖，底层重启也不清。`STATE.json`、`OBSERVATION.json` 永远是最新一份的副本。拿动作上的 `step`，就能找回当时的本体状态和观测。
-- **写的顺序**：先把 `obs/<拍号>/` 下的文件写全，再换 `OBSERVATION.json`，最后换 `STATE.json`。所以 `STATE.json` 一显示新拍号，这一拍的所有文件都已经就位：要和它配对的观测，就按它的拍号去读 `obs/<拍号>/observation.json`（`read_observation(state["tick"])`）。
+- **按拍号存**：每拍的内容存在 `obs/<拍号>/` 下：`state.json`、`observation.json` 和各相机的 `.jpg`，存了就不再覆盖，底层重启也不清。`state.json`、`observation.json` 永远是最新一份的副本。拿动作上的 `step`，就能找回当时的本体状态和观测。
+- **写的顺序**：先把 `obs/<拍号>/` 下的文件写全，再换 `observation.json`，最后换 `state.json`。所以 `state.json` 一显示新拍号，这一拍的所有文件都已经就位：要和它配对的观测，就按它的拍号去读 `obs/<拍号>/observation.json`（`read_observation(state["tick"])`）。
 - **约定**：位姿格式是 `[x, y, z, qw, qx, qy, qz]`；末端位姿和相机外参（相机到世界）在同一个世界坐标系里。夹爪取实测开度，范围 0~1，1 表示全开。
-- **扩展**：驱动通过 `get_extra()` 往观测里加别的字段，放在 `OBSERVATION.json` 的 `extra` 下，比如 RoboDojo 的任务指令。
+- **扩展**：驱动通过 `get_extra()` 往观测里加别的字段，放在 `observation.json` 的 `extra` 下，比如 RoboDojo 的任务指令。
 
 ### 2.6 scene（整个场景）
 
@@ -167,12 +154,13 @@ workspace/
 
 - **存什么**：回到一模一样的场景所需的全部东西，比如每个物体的位姿和速度、关节角和关节速度、布料和流体的状态、机器人上一次下发的指令、任务进行到哪一步。具体存什么、用什么格式，由驱动的 `save_scene` 决定，底层不看内容。
 - **怎么来的**：对话第一次启动底层时，`robot/scene` 还不存在，底层把启动参数 `--scene` 指定的场景文件拷过来。所以 `--scene` 给的文件要和驱动 `save_scene` 存出来的格式一样。
-- **什么时候存**：底层每走一拍（每调一次 `execute_action`）就调一次驱动的 `save_scene`，覆盖保存。重置场景之后也存一次。仿真停着时世界不变，不用存。只留最新的一份。
+- **什么时候存**：底层每走一拍（每调一次 `execute_action`）就调一次驱动的 `save_scene`，覆盖保存。重置场景之后也存一次。仿真停着时世界不变，不用存。只留最新的一份。实测每拍约 2.5 ms，同步做。
+- **快照写盘不拖慢节拍**：快照的 JPEG 编码和 json 由后台写盘线程按交给它的顺序写（`robot/base/simulation/writer.py`），这是 base 内部的事，驱动接口不变。仿真线程只在世界停住时调驱动的 `get_*` 取数据、拷一份交过去。一批动作结束时，动作的结束状态跟在快照后面由写盘线程写进 `action.json`；写完之前仿真不会再读 `action.json`，所以节点看到动作结束时，那一拍的快照一定已经能读到。
 - **整体替换**：底层让驱动先存到同目录的临时文件，存完再整体替换 `robot/scene`。存到一半进程被杀掉，留下的仍是上一份完整的。
 - **不拖慢节点**：最后一个动作做完的那一拍，先发观测、写动作结果，再存场景。节点这时已经拿到了它要的全部东西，存场景和节点思考同时进行。
 - **什么时候读**：只在底层启动时读一次（`load_scene(robot/scene)`）。
 
-### 2.7 COMMAND.json（命令口）
+### 2.7 command.json（命令口）
 
 留给 TUI 的口子：TUI 往这里写一个命令，底层执行并回填结果。节点不用它，`RobotClient` 里也没有对应的方法；robot 包另外提供写命令、查结果的函数（`robot.base.frontend.command_port`），给 TUI 调。现在只有一个命令 `reset`：把场景重置成这个对话启动底层时指定的初始场景（`--scene` 那个文件）。以后要加命令（比如暂停、换场景），在这里加 `op`。同一时间只放一个命令。
 
@@ -194,7 +182,7 @@ workspace/
 - **不认识的命令**：记为 failed，结果写 "Error: RobotError: unknown command '<op>'"。
 - **时机**：底层在每一轮开头处理命令，也就是两拍之间，所以不会打断正在走的那一拍。
 
-### 2.8 ROBOT.md
+### 2.8 body.md
 
 一段文字，介绍这个本体，底层每次启动时写一次。
 
@@ -225,20 +213,20 @@ workspace/
 
 ```
 robot/
-  MANIFEST.json            每个本体的臂和相机（底层启动时写）
-  TICK.json                最新一拍的拍号，所有本体的快照都发完才写
-  COMMAND.json  scene  launch.json  first_scene  simulation.log     底层和前端自己的，留在顶层
+  manifest.json            每个本体的臂和相机（底层启动时写）
+  tick.json                最新一拍的拍号，所有本体的快照都发完才写
+  command.json  scene  launch.json  first_scene  simulation.log     底层和前端自己的，留在顶层
   <本体>/
-    BODY.json              这个本体拥有的臂、看得到的相机、允许的动作；不含其他本体
-    ROBOT.md  ACTION.json  STATE.json  OBSERVATION.json  obs/<拍号>/
+    body.json              这个本体拥有的臂、看得到的相机、允许的动作；不含其他本体
+    body.md  action.json  state.json  observation.json  obs/<拍号>/
 ```
 
 - 一个本体的文件里只有它自己的臂和 manifest 里列给它的相机，位姿和相机外参换算到本体系；对侧的数据不会出现在里面。
-- 所有本体的快照取自同一拍，各自发布；全部发完才写 `TICK.json`。`SimulationProcess` 的状态和拍号读它。
+- 所有本体的快照取自同一拍，各自发布；全部发完才写 `tick.json`。`SimulationProcess` 的状态和拍号读它。
 
 **节点这一侧**：`RobotClient(session_dir, run, node, body)` 构造时绑定一个本体，只读写这个本体的文件夹。对不属于本体的臂、不在 `allowed_actions` 里的动作，在碰任何文件之前抛 `BodyViolation`；报错里只出现本体自己的内容。谁绑哪个本体由上层决定，不由节点自己选。
 
-**执行这一侧**：底层每一轮都对每个本体的 `ACTION.json` 再校验一次，防的是绕过 client 直接写文件：
+**执行这一侧**：底层每一轮都对每个本体的 `action.json` 再校验一次，防的是绕过 client 直接写文件：
 
 - 出现不属于该本体的臂：丢弃。
 - 动作类型不在 `allowed_actions` 里：记为 failed，结果写 "Failed: body '<本体>' may not send '<动作>'."
@@ -294,7 +282,7 @@ robot/
 3. 没有正在执行的动作：如果所有有人用的臂都有了新动作，就把它们改成 running，开始下一次执行；否则停着。刚停下时发一份观测，然后等一会儿。
 4. 回到第 1 步。
 
-**一个顺序要求**：最后一个动作做完时，要先发这一拍的观测（本体状态和观测两个文件），再写这个动作的结束状态，最后保存场景。先做完的动作在结束时还没有新观测，节点要等 `STATE.json` 的拍号变大，才说明这次执行全部结束、新的本体状态和观测都已发出。
+**一个顺序要求**：最后一个动作做完时，要先发这一拍的观测（本体状态和观测两个文件），再写这个动作的结束状态，最后保存场景。先做完的动作在结束时还没有新观测，节点要等 `state.json` 的拍号变大，才说明这次执行全部结束、新的本体状态和观测都已发出。
 
 **例子**
 
@@ -322,7 +310,7 @@ class RobotDriver(ABC):
 
     @abstractmethod
     def describe(self) -> str:
-        """一段文字介绍本体，原样写进 ROBOT.md。"""
+        """一段文字介绍本体，原样写进 body.md。"""
 
     @abstractmethod
     def arm_names(self) -> list[str]:
@@ -423,23 +411,24 @@ class RobotDriver(ABC):
     start()：把仿真环境跑起来
     robot/scene 不存在：把 --scene 指定的文件拷过来
     load_scene(robot/scene)
-    describe() 的内容写进 ROBOT.md
+    describe() 的内容写进 body.md
     上次留下的、没做完的动作和命令记为 failed，所有 holder 清空
-    拍号：有 STATE.json 就取它的拍号加 1，没有就是 0
+    拍号：有 state.json 就取它的拍号加 1，没有就是 0
     上传观测
 
 每一轮：
     来了新 run 的请求：清掉旧 run 的 holder，它没做完的动作记为 failed，结果写 "Failed: run ended."
     命令口有命令（现在只有 reset）：
         load_scene(--scene 指定的文件)；拍号加 1，上传新场景的观测；
-        再把没做完的动作都记为 failed，结果写 "Failed: scene changed."；save_scene
+        等写盘线程写完，再把没做完的动作都记为 failed，结果写 "Failed: scene changed."；存场景
         命令记为 completed；抛异常就记为 failed，结果写 "Error: <异常类型>: <异常信息>"
     有正在执行的动作，或者所有有人用的臂都发来了新动作（新动作改成 running，一起开始）：
         results = execute_action({正在执行动作的臂: 它的动作})
         拍号加 1
         results 里每个结束的动作：按结果判断 completed 或 failed（以 "Error:"、"Failed:" 开头算 failed）
-            如果这是最后一个动作，先上传观测，再写状态、finished_at、duration_ms；否则直接写
+            如果这是最后一个动作，取观测交给写盘线程，写盘线程写完快照再写状态、finished_at、duration_ms；否则直接写
         save_scene：先存到临时文件，再整体替换 robot/scene
+    写盘线程还有快照或跟在它后面的结束状态没写完：先等它写完，再读 action.json
     否则停着：如果是刚停下，上传观测；然后等一会儿
     is_finished() 为真：调用 close()，退出
 
@@ -448,7 +437,7 @@ class RobotDriver(ABC):
     get_images()，按拍号存成 obs/<拍号>/<相机名>.jpg                       → 观测
     每个相机：get_intrinsics(camera)、get_extrinsics(camera)                → 观测
     get_extra()                                                           → 观测的 extra
-    写 obs/<拍号>/state.json、obs/<拍号>/observation.json，再换 OBSERVATION.json，最后换 STATE.json
+    写 obs/<拍号>/state.json、obs/<拍号>/observation.json，再换 observation.json，最后换 state.json
 ```
 
 ### 4.7 出错时
@@ -456,6 +445,7 @@ class RobotDriver(ABC):
 - `start()` 或启动时的 `load_scene` 抛异常：仿真没起来。`run_simulation` 调一次 `close()` 后退出。`robot/scene` 不动。
 - `execute_action` 抛异常：和 1.0 一样，这一拍传进去的动作都记为 failed，结果写 "Error: <异常类型>: <异常信息>"。
 - `save_scene` 抛异常：记日志，`robot/scene` 保持上一份，下一拍再存。
+- 写盘线程写快照出错：记日志，跟在后面的结束状态照样写，等着动作的节点不会卡住。
 - 执行重置命令时 `load_scene` 抛异常：这个命令记为 failed，结果写 "Error: <异常类型>: <异常信息>"。
 - 观测相关的方法抛异常：说明仿真本身出了问题。底层把所有没做完的动作记为 failed，然后退出。
 - 启动时，上次留下的、没做完的动作和命令一律记为 failed，结果写 "Failed: simulation restarted."，从不重放；所有 holder 清空。`obs/` 不清，拍号接着数。
@@ -467,8 +457,8 @@ class RobotDriver(ABC):
 `run_simulation` 负责把仿真环境运行起来，所有仿真器共用一个。它依次做四件事：
 
 1. 调 `driver.start()` 启动仿真环境，再从 `robot/scene` 恢复场景（第一次就先从 `scene` 参数指的文件拷一份）。
-2. 写 ROBOT.md，上传一次观测。
-3. 按 4.6 的循环一直运行：读 ACTION.json 和 COMMAND.json，按节拍调用驱动的方法，再把观测、结果和场景写回文件。
+2. 写 body.md，上传一次观测。
+3. 按 4.6 的循环一直运行：读 action.json 和 command.json，按节拍调用驱动的方法，再把观测、结果和场景写回文件。
 4. `driver.is_finished()` 为真、出错，或者被 Ctrl+C 停下时，调 `driver.close()` 关掉仿真。
 
 ```python
@@ -545,7 +535,7 @@ class RobotClient:
 
     # 本体
     def read_description(self) -> str:
-        """ROBOT.md 的内容。"""
+        """body.md 的内容。"""
 
     # 臂
     def hold(self, arm: str) -> None:
@@ -562,18 +552,16 @@ class RobotClient:
         这一次就一个动作都不写。"""
 
     def read_action(self, arm: str) -> dict | None:
-        """这条臂当前的动作（actions 的最后一个），包括状态、结果等。没有动作时返回 None。"""
-
-    def read_actions(self, arm: str) -> list[dict]:
-        """发给这条臂的所有动作，按时间顺序，最后一个是当前动作。"""
+        """这条臂当前的动作，包括状态、结果等。没有动作时返回 None。
+        以前的动作在本体的 history.jsonl 里，是给人 debug 的，节点不读。"""
 
     # 本体状态和观测
     def read_state(self, tick: int | None = None) -> dict | None:
-        """读本体状态：不给 tick 就读最新一份（STATE.json），给了就读 obs/<tick>/state.json。
+        """读本体状态：不给 tick 就读最新一份（state.json），给了就读 obs/<tick>/state.json。
         没有这一份时返回 None。"""
 
     def read_observation(self, tick: int | None = None) -> dict | None:
-        """读观测：不给 tick 就读最新一份（OBSERVATION.json），给了就读 obs/<tick>/observation.json。
+        """读观测：不给 tick 就读最新一份（observation.json），给了就读 obs/<tick>/observation.json。
         没有这一份时返回 None。里面的图像路径相对于对话文件夹。"""
 
 
@@ -589,7 +577,7 @@ class ArmBusy(RobotError): ...       # 这条臂上还有没结束的动作
 ```python
 # robot/base/frontend/command_port.py
 def send_command(session_dir: Path, op: str) -> str:
-    """往 COMMAND.json 写一个命令，立即返回命令 id。上一个命令还没做完时抛 CommandBusy。"""
+    """往 command.json 写一个命令，立即返回命令 id。上一个命令还没做完时抛 CommandBusy。"""
 
 def read_command(session_dir: Path, command_id: str) -> dict | None:
     """查看这个命令的状态和结果；不是当前这个命令时返回 None。"""
@@ -614,7 +602,7 @@ robot.release("left_arm")
 
 写节点规则时要注意两点：
 
-- 自己的动作做完后，要等 `STATE.json` 的拍号变大，再读本体状态和观测、做下一步决策。这次执行里可能还有别的臂没做完，新的一拍要等所有动作都做完才会发出。
+- 自己的动作做完后，要等 `state.json` 的拍号变大，再读本体状态和观测、做下一步决策。这次执行里可能还有别的臂没做完，新的一拍要等所有动作都做完才会发出。
 - 节点占着臂又去等别的节点，会卡死。比如 A 占着左臂、等 B 拉开门：下一次执行要等所有占着臂的节点都发来动作，A 不发，B 拉门的动作就开始不了。等别人之前，要先放开臂，或者发一个原地保持的动作。
 
 ## 6. 接 RoboDojo（已接通）
@@ -694,9 +682,9 @@ robot/
       paths.py                每个文件放在哪
       fileio.py               整文件原子落盘；两边都写的文件加锁读-改-写（edit_json）
       lifecycle.py            动作和命令共有的生命周期：Status、status_of、Request（start/end）
-      actions.py              ACTION.json：Holder、Action、Arm、ActionFile（read/edit）
-      commands.py             COMMAND.json：Command（read/edit），命令名 RESET
-      snapshots.py            STATE.json、OBSERVATION.json：State、Observation、Snapshot；publish 的写入顺序
+      actions.py              action.json：Holder、Action、Arm、ActionFile（read/edit）
+      commands.py             command.json：Command（read/edit），命令名 RESET
+      snapshots.py            state.json、observation.json：State、Observation、Snapshot；publish 的写入顺序
     client/                   节点这一侧
       robot_client.py         RobotClient：节点用的接口，占臂、发动作、读状态和观测；环境的客户端继承它
     simulation/               仿真这一侧

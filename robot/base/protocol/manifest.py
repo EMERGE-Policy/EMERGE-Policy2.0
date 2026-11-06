@@ -73,10 +73,6 @@ class Body:
             allowed_actions=None if allowed is None else _names(allowed, f"body {name!r} allowed_actions"),
         )
 
-    def allows(self, action_type: str) -> bool:
-        return self.allowed_actions is None or action_type in self.allowed_actions
-
-
 @dataclass(frozen=True)
 class Manifest:
     """Every body."""
@@ -104,10 +100,6 @@ class Manifest:
             if arm in body.arms:
                 return body
         raise ManifestError(f"no body owns arm {arm!r}")
-
-    def visible_cameras(self, body: str) -> tuple[str, ...]:
-        """The cameras `body` sees."""
-        return self.body(body).cameras
 
     @property
     def arms(self) -> list[str]:

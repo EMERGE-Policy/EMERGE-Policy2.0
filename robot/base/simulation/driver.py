@@ -56,7 +56,7 @@ class RobotDriver(ABC):
 
     @abstractmethod
     def describe(self, body: str) -> str:
-        """A paragraph saying what `body` is; its ROBOT.md gets it as it is.
+        """A paragraph saying what `body` is; its body.md gets it as it is.
 
         It says nothing of the other bodies, and gives poses in the body's own frame: this is all a node of
         the body reads of the robot.

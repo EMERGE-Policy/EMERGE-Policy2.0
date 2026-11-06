@@ -4,20 +4,21 @@ Each conversation has its own robot folder, `sessions/<session>/robot/`, next to
 simulation serves one conversation. The simulation's own files are at the top. Each body has a folder of its
 own, and a node of a body reads and writes only there:
 
-    MANIFEST.json                   who owns which arm and camera                     simulation, at start
-    COMMAND.json                    the one command for the simulation               front end and simulation
-    TICK.json                       the tick of the latest snapshot, of every body   simulation
+    manifest.json                   who owns which arm and camera                     simulation, at start
+    command.json                    the one command for the simulation               front end and simulation
+    tick.json                       the tick of the latest snapshot, of every body   simulation
     scene                           the whole scene, saved over after every tick     simulation
     launch.json                     which driver serves this conversation            front end
     first_scene                     the scene the conversation began with            front end
     simulation.log                  the simulation's output, as a process of its own front end
 
     <body>/                         one body's folder (`body_dir`): all a node of that body sees
-        BODY.json                   what the body owns: its arms and cameras         simulation, at start
-        ROBOT.md                    what the body is, in prose                       simulation, at start
-        ACTION.json                 per arm: who holds it, the actions sent to it    its node and simulation
-        STATE.json                  the latest state of its arms                     simulation
-        OBSERVATION.json            the latest observation of its cameras            simulation
+        body.json                   what the body owns: its arms and cameras         simulation, at start
+        body.md                     what the body is, in prose                       simulation, at start
+        action.json                 per arm: who holds it, its current action        its node and simulation
+        history.jsonl               every action that ended, one per line; debugging simulation
+        state.json                  the latest state of its arms                     simulation
+        observation.json            the latest observation of its cameras            simulation
         obs/<tick>/state.json       the state of that tick, kept                     simulation
         obs/<tick>/observation.json the observation of that tick, kept               simulation
         obs/<tick>/<camera>.jpg     that tick's images                               simulation
@@ -45,42 +46,47 @@ def body_dir(folder: Path, body: str) -> Path:
 
 
 def manifest_path(folder: Path) -> Path:
-    """MANIFEST.json of the robot folder: every body's arms and cameras, as the simulation checked them."""
-    return folder / "MANIFEST.json"
+    """manifest.json of the robot folder: every body's arms and cameras, as the simulation checked them."""
+    return folder / "manifest.json"
 
 
 def body_path(folder: Path) -> Path:
-    """BODY.json of a body's folder: what that body owns, and nothing of the others."""
-    return folder / "BODY.json"
+    """body.json of a body's folder: what that body owns, and nothing of the others."""
+    return folder / "body.json"
 
 
 def description_path(folder: Path) -> Path:
-    return folder / "ROBOT.md"
+    return folder / "body.md"
 
 
 # -- changed by both sides ----------------------------------------------------------
 
 
 def action_path(folder: Path) -> Path:
-    return folder / "ACTION.json"
+    return folder / "action.json"
+
+
+def history_path(folder: Path) -> Path:
+    """history.jsonl of a body's folder: every action of the body that ended, for whoever debugs; nodes do not read it."""
+    return folder / "history.jsonl"
 
 
 def command_path(folder: Path) -> Path:
-    """COMMAND.json of the robot folder: it is the simulation's, not a body's."""
-    return folder / "COMMAND.json"
+    """command.json of the robot folder: it is the simulation's, not a body's."""
+    return folder / "command.json"
 
 
 # -- snapshots ------------------------------------------------------------------------
 
 
 def state_path(folder: Path, tick: int | None = None) -> Path:
-    """STATE.json, the latest state; or, given `tick`, the state kept for it."""
-    return folder / "STATE.json" if tick is None else tick_dir(folder, tick) / "state.json"
+    """state.json, the latest state; or, given `tick`, the state kept for it."""
+    return folder / "state.json" if tick is None else tick_dir(folder, tick) / "state.json"
 
 
 def observation_path(folder: Path, tick: int | None = None) -> Path:
-    """OBSERVATION.json, the latest observation; or, given `tick`, the observation kept for it."""
-    return folder / "OBSERVATION.json" if tick is None else tick_dir(folder, tick) / "observation.json"
+    """observation.json, the latest observation; or, given `tick`, the observation kept for it."""
+    return folder / "observation.json" if tick is None else tick_dir(folder, tick) / "observation.json"
 
 
 def image_path(folder: Path, tick: int, camera: str) -> Path:
@@ -97,8 +103,8 @@ def tick_dir(folder: Path, tick: int) -> Path:
 
 
 def tick_path(folder: Path) -> Path:
-    """TICK.json of the robot folder: written after every body has its snapshot of that tick."""
-    return folder / "TICK.json"
+    """tick.json of the robot folder: written after every body has its snapshot of that tick."""
+    return folder / "tick.json"
 
 
 # -- the simulation's own -------------------------------------------------------------

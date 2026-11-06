@@ -1,10 +1,10 @@
-"""STATE.json and OBSERVATION.json: what one tick shows the nodes of one body.
+"""state.json and observation.json: what one tick shows the nodes of one body.
 
 A **snapshot** is everything a node can see of the world at one tick, taken in one go while it stands
 still. It has two halves, kept in two files of the body's folder:
 
-    state        the joints, end-effector pose and gripper of the body's arms     STATE.json
-    observation  the image and matrices of the cameras it sees, and `extra`       OBSERVATION.json
+    state        the joints, end-effector pose and gripper of the body's arms     state.json
+    observation  the image and matrices of the cameras it sees, and `extra`       observation.json
 
 Every body has a snapshot of its own for each tick, cut from the same moment of the world: only its own arms,
 its own cameras and the shared ones, poses in its own frame. (The **scene** is something else: what the
@@ -16,11 +16,11 @@ order readers can rely on:
     1. obs/<tick>/<camera>.jpg        the images, written while the snapshot is taken
     2. obs/<tick>/state.json          the two halves, kept under the tick
        obs/<tick>/observation.json
-    3. OBSERVATION.json               the latest observation
-    4. STATE.json                     the latest state, last of all
+    3. observation.json               the latest observation
+    4. state.json                     the latest state, last of all
 
-so once STATE.json shows a tick, every file of that tick is in place. All bodies are published before
-TICK.json, in the robot folder, shows the tick: it says every body has its snapshot.
+so once state.json shows a tick, every file of that tick is in place. All bodies are published before
+tick.json, in the robot folder, shows the tick: it says every body has its snapshot.
 
 Image paths are relative to the conversation folder, as every path handed out in a conversation is.
 """
@@ -47,7 +47,7 @@ class ArmState:
 
 @dataclass(frozen=True)
 class State:
-    """STATE.json: the arms of one body at `tick`."""
+    """state.json: the arms of one body at `tick`."""
 
     tick: int
     arms: dict[str, ArmState]
@@ -64,7 +64,7 @@ class Camera:
 
 @dataclass(frozen=True)
 class Observation:
-    """OBSERVATION.json: the cameras one body sees at `tick`, and the `extra` fields it may see."""
+    """observation.json: the cameras one body sees at `tick`, and the `extra` fields it may see."""
 
     tick: int
     cameras: dict[str, Camera]
@@ -98,7 +98,7 @@ def publish(folder: Path, snapshot: Snapshot) -> None:
 
 
 def publish_all(folder: Path, snapshots: Mapping[str, Snapshot]) -> None:
-    """Write every body's snapshot, in `folder`, the robot folder, then TICK.json. All are of one tick."""
+    """Write every body's snapshot, in `folder`, the robot folder, then tick.json. All are of one tick."""
     ticks = {snapshot.tick for snapshot in snapshots.values()}
     if len(ticks) != 1:
         raise ValueError(f"the snapshots of one moment are of one tick, got {sorted(ticks)}")

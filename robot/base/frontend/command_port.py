@@ -1,6 +1,6 @@
 """The command port: how a front end tells the simulation serving a conversation what to do.
 
-A command goes into COMMAND.json; the simulation carries it out between ticks and writes how it went.
+A command goes into command.json; the simulation carries it out between ticks and writes how it went.
 One command at a time. Nodes do not use this.
 
     reset    put the scene back to the conversation's first scene
